@@ -594,6 +594,7 @@
         <div class="swatch" data-t="tech" title="Tech"></div>
       </div>
       <button class="btn icon" id="sfxToggle" title="Toggle sound effects">🔊</button>
+      <button class="btn icon" id="btnTranslationSettings" title="Translation settings — boost free MyMemory quota with your email (stored locally only)">⚙️</button>
       <button class="btn" id="btnOpenAI">🤖 AI Assistant</button>
       <button class="btn danger" id="btnResetAll" title="Factory reset — erase ALL data and restore fresh-install state">⟲ Reset All</button>
       <button class="btn primary" id="btnLaunch">▶ Launch Interviews</button>
@@ -773,6 +774,8 @@
           <option value="th">ไทย</option>
           <option value="uk">Українська</option>
           <option value="sv">Svenska</option>
+          <option value="da">Dansk</option>
+          <option value="fa">فارسی</option>
         </select>
       </label>
       <button class="btn warn" id="btnEndEarly" title="Stop the session now and compile partial results">⏹ End Early</button>
@@ -1063,24 +1066,138 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<
 /* ============================================================
    TRANSLATION — MyMemory free API (keyless, no Gemini)
    Translates interview prompts + dynamic options in real time.
+
+   Quota:
+     - Anonymous:            ~5,000 chars/day per IP
+     - With valid email:    ~50,000 chars/day per IP  (10x)
+
+   The email is NEVER hardcoded here. It is read at runtime from
+   (in priority order):
+     1) window.INSIGHTPULSE_CONFIG.mymemoryEmail
+     2) <meta name="mymemory-email" content="...">
+     3) localStorage key 'insightpulse.mymemoryEmail'
+
+   To enable the higher quota, set ONE of the above in your local
+   deployment (e.g. a non-committed config.js, a server-injected
+   meta tag, or a one-time browser setting). Keeping the email out
+   of source protects it in open-source repos.
    ============================================================ */
+function getMyMemoryEmail() {
+  try {
+    if (typeof window !== 'undefined') {
+      const cfg = window.INSIGHTPULSE_CONFIG;
+      if (cfg && typeof cfg.mymemoryEmail === 'string' && cfg.mymemoryEmail.indexOf('@') > 0) {
+        return cfg.mymemoryEmail.trim();
+      }
+    }
+    const meta = document.querySelector('meta[name="mymemory-email"]');
+    if (meta && meta.content && meta.content.indexOf('@') > 0) {
+      return meta.content.trim();
+    }
+    const ls = (typeof localStorage !== 'undefined') && localStorage.getItem('insightpulse.mymemoryEmail');
+    if (ls && ls.indexOf('@') > 0) return ls.trim();
+  } catch(e) {}
+  return '';
+}
+
 const TR_CACHE = {};
+try {
+  // Persist the translation cache across page reloads to further
+  // reduce repeat API calls and preserve daily quota.
+  const raw = localStorage.getItem('insightpulse.trCache');
+  if (raw) Object.assign(TR_CACHE, JSON.parse(raw));
+} catch(e) {}
+let _trCacheSaveTimer = null;
+function _persistTrCache() {
+  if (_trCacheSaveTimer) return;
+  _trCacheSaveTimer = setTimeout(() => {
+    _trCacheSaveTimer = null;
+    try { localStorage.setItem('insightpulse.trCache', JSON.stringify(TR_CACHE)); } catch(e) {}
+  }, 400);
+}
+
 async function trText(text, lang) {
   if (!text || !lang || lang === 'en') return text;
   const key = lang + '::' + text;
   if (TR_CACHE[key]) return TR_CACHE[key];
   try {
-    const res = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|' + encodeURIComponent(lang));
+    let url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|' + encodeURIComponent(lang);
+    const email = getMyMemoryEmail();
+    if (email) url += '&de=' + encodeURIComponent(email); // raises quota from ~5k to ~50k chars/day
+    const res = await fetch(url);
     const data = await res.json();
     if (res.ok && data && data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
       const t = data.responseData.translatedText;
       TR_CACHE[key] = t;
+      _persistTrCache();
       return t;
     }
   } catch(e) {}
   return text; // graceful fallback: keep original English
 }
 function trBatch(arr, lang) { return Promise.all(arr.map(s => trText(s, lang))); }
+
+/* ============================================================
+   TRANSLATION SETTINGS UI (gear ⚙️ in topbar)
+   Lets each user save THEIR OWN email for the higher MyMemory
+   quota (~50k vs ~5k chars/day). The email is stored ONLY in
+   this browser's localStorage — never hardcoded in source,
+   never sent anywhere except as the '&de=' parameter on
+   MyMemory translation requests.
+   ============================================================ */
+const MM_EMAIL_KEY = 'insightpulse.mymemoryEmail';
+
+function openTranslationSettings() {
+  let current = '';
+  try { current = localStorage.getItem(MM_EMAIL_KEY) || ''; } catch(e) {}
+  openModal('⚙️ Translation Settings', `
+    <p class="muted" style="margin-top:0;">
+      Translations use the free <strong>MyMemory</strong> API. Anonymous mode allows
+      ~5,000 chars/day — adding your email raises it to ~50,000 chars/day (10× boost).
+    </p>
+    <div class="field">
+      <label for="mmEmailInput">Your email (optional)</label>
+      <input type="email" id="mmEmailInput" placeholder="you@example.com" value="${escapeHtml(current)}" autocomplete="off" />
+    </div>
+    <div id="mmStatus" style="font-size:13px;font-weight:600;color:${current ? 'var(--success)' : 'var(--text-muted)'};">
+      ${current ? '✅ Boosted mode active — ~50,000 chars/day' : 'Anonymous mode — ~5,000 chars/day'}
+    </div>
+    <div class="inline-row" style="margin-top:16px;">
+      <button class="btn primary" id="mmSave">💾 Save</button>
+      <button class="btn ghost" id="mmClear">Clear</button>
+    </div>
+    <p class="muted" style="font-size:12px;margin:16px 0 0;">
+      🔒 Privacy: saved only in <strong>this browser's localStorage</strong>.
+      Nothing is hardcoded in the source code and nothing is sent to any server —
+      the email is only attached as a parameter to MyMemory translation requests.
+    </p>
+  `);
+  const input = document.getElementById('mmEmailInput');
+  const status = document.getElementById('mmStatus');
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('mmSave').click(); });
+  document.getElementById('mmSave').addEventListener('click', () => {
+    const v = input.value.trim();
+    if (v && v.indexOf('@') < 1) { toast('Please enter a valid email address.', 'error'); sfx('error'); input.focus(); return; }
+    try {
+      if (v) localStorage.setItem(MM_EMAIL_KEY, v);
+      else localStorage.removeItem(MM_EMAIL_KEY);
+    } catch(e) {}
+    status.textContent = v ? '✅ Boosted mode active — ~50,000 chars/day' : 'Anonymous mode — ~5,000 chars/day';
+    status.style.color = v ? 'var(--success)' : 'var(--text-muted)';
+    toast(v ? 'Email saved — quota boosted! 🚀' : 'Cleared — anonymous mode');
+    sfx('click');
+    closeModal();
+  });
+  document.getElementById('mmClear').addEventListener('click', () => {
+    try { localStorage.removeItem(MM_EMAIL_KEY); } catch(e) {}
+    input.value = '';
+    status.textContent = 'Anonymous mode — ~5,000 chars/day';
+    status.style.color = 'var(--text-muted)';
+    toast('Email cleared — back to anonymous mode');
+    sfx('soft');
+  });
+  setTimeout(() => input.focus(), 50);
+}
 
 /* ============================================================
    INTERVIEW MODE
@@ -1677,6 +1794,9 @@ function bind() {
   document.getElementById('aiSend').addEventListener('click', aiChatSend);
   document.getElementById('aiInput').addEventListener('keydown', e => { if (e.key === 'Enter') aiChatSend(); });
   // modal
+  // translation settings (MyMemory quota boost)
+  document.getElementById('btnTranslationSettings').addEventListener('click', openTranslationSettings);
+  // modal
   document.getElementById('modalClose').addEventListener('click', closeModal);
   document.getElementById('modalBack').addEventListener('click', e => { if (e.target.id === 'modalBack') closeModal(); });
 }
@@ -1717,6 +1837,8 @@ if (!State.questions.length && !State.responses.length) {
   renderQuestions(); save();
 }
 </script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
 </body>
