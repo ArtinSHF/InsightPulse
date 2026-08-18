@@ -416,4 +416,3 @@ Feel free to explore the code and use it as inspiration for your own frontend ex
 If you found InsightPulse interesting, consider giving the repository a ⭐ on GitHub!
 
 Built with HTML, CSS, JavaScript, and a ridiculous amount of frontend engineering. 🚀
-<img width="1918" height="871" alt="Screenshot" src="https://github.com/user-attachments/assets/f760e794-ff58-4358-ae08-0b2bee2365bf" />
