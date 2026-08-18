@@ -14,7 +14,7 @@ Built as a single-file frontend application, InsightPulse is designed as both a 
 
 InsightPulse is deployed online using Vercel.
 
-**Live site:** https://YOUR-VERCEL-DOMAIN.vercel.app
+**Live site:**  https://https://insight-pulse-nu.vercel.app/
 
 ---
 
