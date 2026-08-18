@@ -14,27 +14,7 @@ Built as a single-file frontend application, InsightPulse is designed as both a 
 
 InsightPulse is deployed online using Vercel.
 
-**Live site:**  https://https://insight-pulse-nu.vercel.app/
-
----
-
-## 📸 Screenshots
-
-### Admin Dashboard
-
-<img width="1861" height="927" alt="InsightPulse Admin Dashboard" src="YOUR_ADMIN_SCREENSHOT_URL_HERE" />
-
-### Survey / Interview Mode
-
-<img width="1861" height="927" alt="InsightPulse Interview Mode" src="YOUR_INTERVIEW_SCREENSHOT_URL_HERE" />
-
-### Theme System
-
-<img width="1861" height="927" alt="InsightPulse Theme Selector" src="YOUR_THEME_SCREENSHOT_URL_HERE" />
-
-### AI Assistant
-
-<img width="1861" height="927" alt="InsightPulse AI Assistant" src="YOUR_AI_SCREENSHOT_URL_HERE" />
+**Live site:**  https://insight-pulse-nu.vercel.app/
 
 ---
 
