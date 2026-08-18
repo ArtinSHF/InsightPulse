@@ -210,6 +210,14 @@
   .btn.primary:hover { box-shadow: var(--shadow-lg); }
   .btn.ghost { background: transparent; }
   .btn.danger { color: var(--danger); border-color: var(--danger); }
+  .btn.warn { color: var(--warning); border-color: var(--warning); }
+  .btn.warn:hover { border-color: var(--warning); }
+  .lang-select {
+    background: transparent; border: none; border-radius: 8px;
+    padding: 2px; font-size: 12px; font-weight: 600;
+    color: var(--text); cursor: pointer; outline: none; max-width: 140px;
+  }
+  .lang-select option { color: #101828; background: #ffffff; }
   .btn.sm { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
   .btn.icon { padding: 8px; width: 36px; height: 36px; justify-content: center; }
 
@@ -587,6 +595,7 @@
       </div>
       <button class="btn icon" id="sfxToggle" title="Toggle sound effects">🔊</button>
       <button class="btn" id="btnOpenAI">🤖 AI Assistant</button>
+      <button class="btn danger" id="btnResetAll" title="Factory reset — erase ALL data and restore fresh-install state">⟲ Reset All</button>
       <button class="btn primary" id="btnLaunch">▶ Launch Interviews</button>
     </div>
   </div>
@@ -740,6 +749,33 @@
     </div>
     <div class="inline-row">
       <div class="chip" id="ivProgress">Participant 1 / 5</div>
+      <div class="chip hidden" id="ivTranslating">🌐 Translating…</div>
+      <label class="chip" style="cursor:pointer;gap:4px;" title="Interview language">
+        🌐
+        <select id="ivLang" class="lang-select">
+          <option value="en">English</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+          <option value="de">Deutsch</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Português</option>
+          <option value="nl">Nederlands</option>
+          <option value="pl">Polski</option>
+          <option value="ru">Русский</option>
+          <option value="ar">العربية</option>
+          <option value="hi">हिन्दी</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="zh-CN">中文(简体)</option>
+          <option value="tr">Türkçe</option>
+          <option value="id">Bahasa Indonesia</option>
+          <option value="vi">Tiếng Việt</option>
+          <option value="th">ไทย</option>
+          <option value="uk">Українська</option>
+          <option value="sv">Svenska</option>
+        </select>
+      </label>
+      <button class="btn warn" id="btnEndEarly" title="Stop the session now and compile partial results">⏹ End Early</button>
       <div class="theme-picker" id="themePickerIV">
         <div class="swatch active" data-t="light"></div>
         <div class="swatch" data-t="dark"></div>
@@ -821,6 +857,8 @@ const State = {
   gemini: { key: '', model: 'gemini-2.5-flash' },
   interview: { active: false, participantIdx: 0, questionIdx: 0, draft: {} },
   chat: [],
+  lang: 'en',
+  partialSession: false,
 };
 
 function save() {
@@ -1023,12 +1061,35 @@ function moveQ(id, dir) {
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* ============================================================
+   TRANSLATION — MyMemory free API (keyless, no Gemini)
+   Translates interview prompts + dynamic options in real time.
+   ============================================================ */
+const TR_CACHE = {};
+async function trText(text, lang) {
+  if (!text || !lang || lang === 'en') return text;
+  const key = lang + '::' + text;
+  if (TR_CACHE[key]) return TR_CACHE[key];
+  try {
+    const res = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|' + encodeURIComponent(lang));
+    const data = await res.json();
+    if (res.ok && data && data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
+      const t = data.responseData.translatedText;
+      TR_CACHE[key] = t;
+      return t;
+    }
+  } catch(e) {}
+  return text; // graceful fallback: keep original English
+}
+function trBatch(arr, lang) { return Promise.all(arr.map(s => trText(s, lang))); }
+
+/* ============================================================
    INTERVIEW MODE
    ============================================================ */
 function launchInterview() {
   if (!State.questions.length) { toast('Add at least one question first.', 'error'); sfx('error'); return; }
   if (!State.company.trim()) { toast('Please enter a company name.', 'error'); sfx('error'); return; }
   State.interview = { active: true, participantIdx: 0, questionIdx: 0, draft: {} };
+  State.partialSession = false;
   document.getElementById('adminView').classList.add('hidden');
   document.getElementById('interviewShell').classList.remove('hidden');
   document.getElementById('ivCompany').textContent = State.company;
@@ -1045,35 +1106,59 @@ function exitInterview() {
   sfx('soft');
 }
 
-function renderInterview() {
+async function renderInterview() {
   const { participantIdx, questionIdx, draft } = State.interview;
   const total = State.questions.length;
   const q = State.questions[questionIdx];
   const pTotal = State.participants;
   const progress = ((questionIdx) / total) * 100;
 
-  document.getElementById('ivProgress').textContent = `Participant ${participantIdx+1} / ${pTotal} · Q${questionIdx+1}/${total}`;
+  // ---------- real-time translation (interview language) ----------
+  const lang = State.lang || 'en';
+  let ui = { participant: 'Participant', question: 'Question', of: 'of', next: 'Next', prev: 'Previous', submit: 'Submit' };
+  let promptText = q.prompt || '(untitled question)';
+  let optionTexts = q.type === 'mc' ? q.options.slice() : null;
+  let likertLabels = ['Strongly Disagree','Disagree','Neutral','Agree','Strongly Agree'];
+
+  if (lang !== 'en') {
+    const tChip = document.getElementById('ivTranslating');
+    if (tChip) tChip.classList.remove('hidden');
+    try {
+      const jobs = [
+        trText(ui.participant, lang), trText(ui.question, lang), trText(ui.of, lang),
+        trText(ui.next, lang), trText(ui.prev, lang), trText(ui.submit, lang),
+        trText(promptText, lang)
+      ];
+      if (optionTexts) optionTexts = await trBatch(optionTexts, lang);
+      if (q.type === 'likert') likertLabels = await trBatch(likertLabels, lang);
+      const r = await Promise.all(jobs);
+      [ui.participant, ui.question, ui.of, ui.next, ui.prev, ui.submit, promptText] = r;
+    } catch(e) { /* fall back to English on any failure */ }
+    if (tChip) tChip.classList.add('hidden');
+    if (!State.interview.active) return; // session was closed mid-translation
+  }
+
+  document.getElementById('ivProgress').textContent = `${ui.participant} ${participantIdx+1} / ${pTotal} · ${ui.question} ${questionIdx+1}/${total}`;
   document.getElementById('ivFill').style.width = progress + '%';
 
   const content = document.getElementById('ivContent');
   const isLast = questionIdx === total - 1;
 
   let inner = `
-    <div class="muted" style="font-size:13px;margin-bottom:6px;">Question ${questionIdx+1} of ${total}</div>
-    <h2 style="margin:0 0 20px;font-size:22px;line-height:1.35;">${escapeHtml(q.prompt || '(untitled question)')}</h2>
+    <div class="muted" style="font-size:13px;margin-bottom:6px;">${ui.question} ${questionIdx+1} ${ui.of} ${total}</div>
+    <h2 style="margin:0 0 20px;font-size:22px;line-height:1.35;">${escapeHtml(promptText)}</h2>
   `;
 
   if (q.type === 'mc') {
-    inner += q.options.map((o,i) => `
+    inner += optionTexts.map((o,i) => `
       <div class="choice ${draft[q.id] === i ? 'selected' : ''}" data-pick="${i}">
         <div class="choice-letter">${String.fromCharCode(65+i)}</div>
         <div>${escapeHtml(o)}</div>
       </div>
     `).join('');
   } else if (q.type === 'likert') {
-    const labels = ['Strongly Disagree','Disagree','Neutral','Agree','Strongly Agree'];
-    inner += `<div class="likert">` + labels.map((l,i) => `
-      <button data-likert="${i+1}" class="${draft[q.id] === i+1 ? 'selected' : ''}">${l}</button>
+    inner += `<div class="likert">` + likertLabels.map((l,i) => `
+      <button data-likert="${i+1}" class="${draft[q.id] === i+1 ? 'selected' : ''}">${escapeHtml(l)}</button>
     `).join('') + `</div>`;
   } else {
     inner += `<textarea data-text style="width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:14px;font-size:15px;min-height:140px;color:var(--text);outline:none;">${escapeHtml(draft[q.id] || '')}</textarea>`;
@@ -1097,7 +1182,8 @@ function renderInterview() {
   const ta = content.querySelector('[data-text]');
   if (ta) ta.addEventListener('input', e => { State.interview.draft[q.id] = e.target.value; save(); });
 
-  document.getElementById('ivNext').textContent = isLast ? 'Submit ✓' : 'Next →';
+  document.getElementById('ivNext').textContent = isLast ? ui.submit + ' ✓' : ui.next + ' →';
+  document.getElementById('ivPrev').textContent = '← ' + ui.prev;
   document.getElementById('ivPrev').disabled = questionIdx === 0;
   document.getElementById('ivPrev').style.opacity = questionIdx === 0 ? '.4' : '1';
 }
@@ -1150,6 +1236,44 @@ function ivPrev() {
   }
 }
 
+/* ---------- End Early: stop session & compile partial results ---------- */
+function endEarly() {
+  if (!State.interview.active) return;
+  const n = State.responses.length;
+  const target = State.participants;
+  const msg = n > 0
+    ? `End the session early?\n\n${n} of ${target} participant response(s) have been collected. The partial results will be compiled and displayed immediately.`
+    : `End the session early?\n\nNo responses have been collected yet (0 of ${target} participants).`;
+  if (!confirm(msg)) return;
+  State.partialSession = true;
+  save();
+  State.interview.active = false;
+  document.getElementById('interviewShell').classList.add('hidden');
+  document.getElementById('adminView').classList.remove('hidden');
+  switchTab('results');
+  toast(n > 0 ? `Session ended early — ${n} partial response(s) compiled ✓` : 'Session ended early — no responses collected', n > 0 ? 'success' : 'info');
+  sfx('submit');
+}
+
+/* ---------- Reset All: complete factory reset ---------- */
+function resetAll() {
+  if (!confirm('⚠ FACTORY RESET\n\nThis will permanently erase EVERYTHING: questions, responses, API keys, chat history, settings, and all stored data — returning InsightPulse to an absolute fresh-install state.\n\nThis cannot be undone. Continue?')) return;
+  try { localStorage.clear(); } catch(e){}
+  try { sessionStorage.clear(); } catch(e){}
+  try {
+    document.cookie.split(';').forEach(c => {
+      document.cookie = c.replace(/^ +/, '').replace(/=.*/, '=;expires=' + new Date(0).toUTCString() + ';path=/');
+    });
+  } catch(e){}
+  try {
+    if (window.indexedDB && indexedDB.databases) {
+      indexedDB.databases().then(dbs => (dbs||[]).forEach(db => { try { indexedDB.deleteDatabase(db.name); } catch(e){} }));
+    }
+  } catch(e){}
+  toast('All data erased — restarting…', 'success');
+  setTimeout(() => location.reload(), 600);
+}
+
 /* ============================================================
    RESULTS + AGGREGATION
    ============================================================ */
@@ -1164,6 +1288,9 @@ function renderResults() {
     return;
   }
   sum.textContent = `${State.responses.length} submission(s) across ${State.questions.length} question(s).`;
+  if (State.partialSession && State.responses.length < State.participants) {
+    sum.textContent += ' ⏹ Partial session — ended early before the full participant quota was met.';
+  }
 
   const agg = aggregate();
   box.innerHTML = agg.map(a => `
@@ -1526,8 +1653,17 @@ function bind() {
   document.getElementById('btnGenQuestions').addEventListener('click', aiGenerateQuestions);
   // launch + interview nav
   document.getElementById('btnLaunch').addEventListener('click', launchInterview);
+  document.getElementById('btnResetAll').addEventListener('click', resetAll);
   document.getElementById('btnExitIV').addEventListener('click', () => {
     if (confirm('Exit interview session? Progress for the current participant will be lost.')) exitInterview();
+  });
+  document.getElementById('btnEndEarly').addEventListener('click', endEarly);
+  document.getElementById('ivLang').addEventListener('change', e => {
+    State.lang = e.target.value;
+    save();
+    sfx('click');
+    toast(State.lang === 'en' ? 'Language: English' : 'Translating interview…');
+    if (State.interview.active) renderInterview();
   });
   document.getElementById('ivNext').addEventListener('click', ivNext);
   document.getElementById('ivPrev').addEventListener('click', ivPrev);
@@ -1551,6 +1687,7 @@ function hydrate() {
   document.getElementById('participantCount').value = State.participants;
   document.getElementById('geminiKey').value = State.gemini.key || '';
   document.getElementById('geminiModel').value = State.gemini.model || 'gemini-2.5-flash';
+  document.getElementById('ivLang').value = State.lang || 'en';
   applyTheme(State.theme || 'light');
   updateSfxIcon();
   renderQuestions();
@@ -1580,6 +1717,7 @@ if (!State.questions.length && !State.responses.length) {
   renderQuestions(); save();
 }
 </script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
 </body>
 </html>
