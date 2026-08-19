@@ -2151,16 +2151,7 @@ function bind() {
     if (!State.questions.length) return;
     if (confirm('Delete all questions?')) { State.questions = []; renderQuestions(); save(); sfx('soft'); }
   });
-  // Gemini config
-  document.getElementById('geminiKey').addEventListener('input', e => { State.gemini.key = e.target.value; save(); });
-  document.getElementById('geminiModel').addEventListener('change', e => { State.gemini.model = e.target.value; save(); });
-  document.getElementById('btnTestAI').addEventListener('click', async () => {
-    try {
-      toast('Testing…');
-      const r = await callGemini('Reply with exactly the word: OK');
-      toast('Gemini reachable: ' + r.slice(0,40), 'success');
-    } catch(e) { toast(e.message, 'error'); }
-  });
+  // Gemini config now lives entirely in the settings modal (setSaveAI/setTestAI above)
   // launch + interview nav
   document.getElementById('btnLaunch').addEventListener('click', launchInterview);
   // Landing screen navigation
