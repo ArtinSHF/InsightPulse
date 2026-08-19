@@ -795,8 +795,7 @@
         <div class="swatch" data-t="tech" title="Tech"></div>
       </div>
       <button class="btn icon" id="sfxToggle" title="Toggle sound effects">🔊</button>
-      <button class="btn icon" id="btnTranslationSettings" title="Translation settings — boost free MyMemory quota with your email (stored locally only)">⚙️</button>
-      <button class="btn icon" id="btnOpenSettings" title="Settings — AI configuration, factory reset">⚙</button>
+      <button class="btn icon" id="btnOpenSettings" title="Settings — AI configuration, translation, factory reset">⚙</button>
       <button class="btn" id="btnOpenAI">🤖 AI Assistant</button>
       <button class="btn primary" id="btnLaunch">▶ Launch Interviews</button>
     </div>
@@ -1347,58 +1346,7 @@ function trBatch(arr, lang) { return Promise.all(arr.map(s => trText(s, lang)));
    MyMemory translation requests.
    ============================================================ */
 const MM_EMAIL_KEY = 'insightpulse.mymemoryEmail';
-
-function openTranslationSettings() {
-  let current = '';
-  try { current = localStorage.getItem(MM_EMAIL_KEY) || ''; } catch(e) {}
-  openModal('⚙️ Translation Settings', `
-    <p class="muted" style="margin-top:0;">
-      Translations use the free <strong>MyMemory</strong> API. Anonymous mode allows
-      ~5,000 chars/day — adding your email raises it to ~50,000 chars/day (10× boost).
-    </p>
-    <div class="field">
-      <label for="mmEmailInput">Your email (optional)</label>
-      <input type="email" id="mmEmailInput" placeholder="you@example.com" value="${escapeHtml(current)}" autocomplete="off" />
-    </div>
-    <div id="mmStatus" style="font-size:13px;font-weight:600;color:${current ? 'var(--success)' : 'var(--text-muted)'};">
-      ${current ? '✅ Boosted mode active — ~50,000 chars/day' : 'Anonymous mode — ~5,000 chars/day'}
-    </div>
-    <div class="inline-row" style="margin-top:16px;">
-      <button class="btn primary" id="mmSave">💾 Save</button>
-      <button class="btn ghost" id="mmClear">Clear</button>
-    </div>
-    <p class="muted" style="font-size:12px;margin:16px 0 0;">
-      🔒 Privacy: saved only in <strong>this browser's localStorage</strong>.
-      Nothing is hardcoded in the source code and nothing is sent to any server —
-      the email is only attached as a parameter to MyMemory translation requests.
-    </p>
-  `);
-  const input = document.getElementById('mmEmailInput');
-  const status = document.getElementById('mmStatus');
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('mmSave').click(); });
-  document.getElementById('mmSave').addEventListener('click', () => {
-    const v = input.value.trim();
-    if (v && v.indexOf('@') < 1) { toast('Please enter a valid email address.', 'error'); sfx('error'); input.focus(); return; }
-    try {
-      if (v) localStorage.setItem(MM_EMAIL_KEY, v);
-      else localStorage.removeItem(MM_EMAIL_KEY);
-    } catch(e) {}
-    status.textContent = v ? '✅ Boosted mode active — ~50,000 chars/day' : 'Anonymous mode — ~5,000 chars/day';
-    status.style.color = v ? 'var(--success)' : 'var(--text-muted)';
-    toast(v ? 'Email saved — quota boosted! 🚀' : 'Cleared — anonymous mode');
-    sfx('click');
-    closeModal();
-  });
-  document.getElementById('mmClear').addEventListener('click', () => {
-    try { localStorage.removeItem(MM_EMAIL_KEY); } catch(e) {}
-    input.value = '';
-    status.textContent = 'Anonymous mode — ~5,000 chars/day';
-    status.style.color = 'var(--text-muted)';
-    toast('Email cleared — back to anonymous mode');
-    sfx('soft');
-  });
-  setTimeout(() => input.focus(), 50);
-}
+// Translation settings UI now lives inside the merged Settings modal (openSettingsModal, below).
 
 /* ============================================================
    VIEW ROUTING (landing / admin / interview)
@@ -2026,6 +1974,8 @@ function switchTab(name) {
 function openSettingsModal() {
   const currentKey = State.gemini.key || '';
   const currentModel = State.gemini.model || 'gemini-2.5-flash';
+  let currentMMEmail = '';
+  try { currentMMEmail = localStorage.getItem(MM_EMAIL_KEY) || ''; } catch(e) {}
   const models = [
     'gemini-2.5-flash','gemini-2.5-flash-lite','gemini-2.5-pro',
     'gemini-2.0-flash','gemini-2.0-flash-lite',
@@ -2050,6 +2000,28 @@ function openSettingsModal() {
       <button class="btn primary" id="setSaveAI">💾 Save</button>
       <button class="btn" id="setTestAI">🔌 Test connection</button>
     </div>
+    <hr class="sep"/>
+    <h3 style="margin:0 0 4px;font-size:15px;">🌐 Translation</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:12px;">
+      Translations use the free <strong>MyMemory</strong> API. Anonymous mode allows
+      ~5,000 chars/day — adding your email raises it to ~50,000 chars/day (10× boost).
+    </div>
+    <div class="field">
+      <label for="mmEmailInput">Your email (optional)</label>
+      <input type="email" id="mmEmailInput" placeholder="you@example.com" value="${escapeHtml(currentMMEmail)}" autocomplete="off" />
+    </div>
+    <div id="mmStatus" style="font-size:13px;font-weight:600;color:${currentMMEmail ? 'var(--success)' : 'var(--text-muted)'};">
+      ${currentMMEmail ? '✅ Boosted mode active — ~50,000 chars/day' : 'Anonymous mode — ~5,000 chars/day'}
+    </div>
+    <div class="inline-row" style="margin-top:12px;">
+      <button class="btn primary" id="mmSave">💾 Save email</button>
+      <button class="btn ghost" id="mmClear">Clear</button>
+    </div>
+    <p class="muted" style="font-size:12px;margin:12px 0 0;">
+      🔒 Privacy: saved only in <strong>this browser's localStorage</strong>.
+      Nothing is hardcoded in the source code and nothing is sent to any server —
+      the email is only attached as a parameter to MyMemory translation requests.
+    </p>
     <hr class="sep"/>
     <h3 style="margin:0 0 4px;font-size:15px;color:var(--danger);">⚠ Danger Zone</h3>
     <div class="muted" style="font-size:12px;margin-bottom:12px;">Factory reset erases every question, response, session, API key and setting — restoring InsightPulse to a fresh-install state. This cannot be undone.</div>
@@ -2080,6 +2052,30 @@ function openSettingsModal() {
   document.getElementById('setResetAll').addEventListener('click', () => {
     closeModal();
     resetAll();
+  });
+  // Translation (MyMemory quota boost)
+  const $mmInput = document.getElementById('mmEmailInput');
+  const $mmStatus = document.getElementById('mmStatus');
+  $mmInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('mmSave').click(); });
+  document.getElementById('mmSave').addEventListener('click', () => {
+    const v = $mmInput.value.trim();
+    if (v && v.indexOf('@') < 1) { toast('Please enter a valid email address.', 'error'); sfx('error'); $mmInput.focus(); return; }
+    try {
+      if (v) localStorage.setItem(MM_EMAIL_KEY, v);
+      else localStorage.removeItem(MM_EMAIL_KEY);
+    } catch(e) {}
+    $mmStatus.textContent = v ? '✅ Boosted mode active — ~50,000 chars/day' : 'Anonymous mode — ~5,000 chars/day';
+    $mmStatus.style.color = v ? 'var(--success)' : 'var(--text-muted)';
+    toast(v ? 'Email saved — quota boosted! 🚀' : 'Cleared — anonymous mode');
+    sfx('click');
+  });
+  document.getElementById('mmClear').addEventListener('click', () => {
+    try { localStorage.removeItem(MM_EMAIL_KEY); } catch(e) {}
+    $mmInput.value = '';
+    $mmStatus.textContent = 'Anonymous mode — ~5,000 chars/day';
+    $mmStatus.style.color = 'var(--text-muted)';
+    toast('Email cleared — back to anonymous mode');
+    sfx('soft');
   });
 }
 
@@ -2197,9 +2193,6 @@ function bind() {
   document.getElementById('btnCloseAI').addEventListener('click', closeAI);
   document.getElementById('aiSend').addEventListener('click', aiChatSend);
   document.getElementById('aiInput').addEventListener('keydown', e => { if (e.key === 'Enter') aiChatSend(); });
-  // modal
-  // translation settings (MyMemory quota boost)
-  document.getElementById('btnTranslationSettings').addEventListener('click', openTranslationSettings);
   // modal
   document.getElementById('modalClose').addEventListener('click', closeModal);
   document.getElementById('modalBack').addEventListener('click', e => { if (e.target.id === 'modalBack') closeModal(); });
