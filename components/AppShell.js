@@ -108,22 +108,11 @@ export default function AppShell({ shareSlug = null }) {
     script.src = '/legacy/app.js';
     script.defer = true;
 
-    script.onload = () => {
-      const featuresScript = document.createElement('script');
-      featuresScript.src = '/legacy/features.js';
-      featuresScript.onload = () => {
-        // Respondent / creator initialization happens only after both scripts exist.
-        initializeApp();
-      };
-      document.body.appendChild(featuresScript);
-    };
-
-    document.body.appendChild(script);
-
-    async function initializeApp() {
+    script.onload = async () => {
       const { data } = await supabase.auth.getSession();
       IPS.user = data?.session?.user || null;
 
+      // Fetch the share BEFORE loading features.js.
       if (respondentMode) {
         try {
           const res = await fetch(
@@ -141,25 +130,15 @@ export default function AppShell({ shareSlug = null }) {
         } catch (e) {
           IPS.share = null;
         }
-
-        if (
-          typeof window.ipRespondentInit === 'function' &&
-          IPS.share &&
-          !IPS.share.closed
-        ) {
-          window.ipRespondentInit(IPS.share);
-        } else if (
-          typeof window.ipShowClosed === 'function' &&
-          (!IPS.share || IPS.share.closed)
-        ) {
-          window.ipShowClosed(IPS.share);
-        }
-      } else {
-        if (typeof window.ipRenderAuthArea === 'function') {
-          window.ipRenderAuthArea();
-        }
       }
-    }
+
+      // Now load features.js. Its startup code can safely see IPS.share.
+      const featuresScript = document.createElement('script');
+      featuresScript.src = '/legacy/features.js';
+      document.body.appendChild(featuresScript);
+    };
+
+    document.body.appendChild(script);
   }, [bodyHtml, shareSlug]);
 
   if (!bodyHtml) {
