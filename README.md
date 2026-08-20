@@ -4,31 +4,36 @@
 
 ---
 
-InsightPulse is a modern web-based enterprise survey and interactive interview platform designed for creating, managing, and running structured participant interviews through a polished, responsive interface.
+InsightPulse is a modern web-based enterprise survey and interactive interview platform designed for creating, managing, sharing, and running structured participant interviews through a polished, responsive interface.
 
-The application combines a flexible survey builder, sequential participant sessions, dynamic visual themes, persistent interview data, audio feedback, and optional Google Gemini AI integration for analyzing responses and generating intelligent interview questions.
+The application combines a flexible survey builder, sequential participant sessions, dynamic visual themes, persistent cloud-backed workspace data, secure creator authentication, public shareable interview links, respondent limits, AI-powered analysis, question generation, translation tools, and browser-based audio feedback.
 
-Built as a single-file frontend application, InsightPulse is designed as both a functional survey tool and a frontend engineering experiment focused on UI/UX, state management, browser APIs, responsive design, and AI-assisted workflows.
+Originally created as a single-file frontend experiment, InsightPulse has evolved into a full **Next.js + Supabase application** while preserving much of the original frontend experience and UI architecture.
+
+---
 
 ## 🌐 Live Website
 
 InsightPulse is deployed online using Vercel.
 
-**Live site:**  https://insight-pulse-nu.vercel.app/
+**Live site:**  
+https://insight-pulse-nu.vercel.app/
 
 ---
 
 ## 🎯 About the Project
 
-InsightPulse allows users to create and run interactive surveys and interviews without requiring a traditional backend.
+InsightPulse allows creators to design and run interactive surveys and interviews while also providing a public sharing system that lets respondents participate without creating an account.
 
-The platform has two primary experiences:
+The platform now has two primary experiences:
 
-**Admin Mode** — Build and configure surveys, manage participants, customize company branding, configure AI settings, and control the application.
+**Creator Mode** — Build surveys, configure participants, customize branding and themes, manage shared interview links, review responses, configure AI, and control the application.
 
-**Interview Mode** — Run the survey sequentially with participants while tracking progress, collecting responses, and dynamically changing the visual experience.
+**Respondent Mode** — Open a public interview link, answer questions without signing in, submit responses, and receive a completion screen.
 
-The application stores survey configuration, interview progress, and participant responses locally so the session can continue without losing progress after a page refresh.
+Creator accounts are handled through **Supabase Authentication**, while respondents remain anonymous and never need an account.
+
+The platform also synchronizes creator workspace state through Supabase, allowing important application state to persist across devices rather than relying exclusively on browser storage.
 
 ---
 
@@ -37,28 +42,114 @@ The application stores survey configuration, interview progress, and participant
 ### 📊 Survey Builder
 
 * **Flexible Question Builder:** Create surveys using multiple question types.
-* **Multiple Choice Questions:** Add custom answer options such as A, B, C, D, etc.
-* **Likert Scale:** Built-in 5-point agreement scale from Strongly Agree to Strongly Disagree.
+* **Multiple Choice Questions:** Add custom selectable answer options.
+* **Likert Scale:** Built-in 5-point agreement scale.
 * **Free Text Questions:** Collect detailed open-ended participant responses.
-* **Dynamic Question Management:** Add and configure questions directly inside the admin interface.
-* **Company Branding:** Set the target company name and automatically display it throughout participant-facing forms.
+* **Dynamic Question Management:** Add, edit, configure, and organize questions directly inside the creator interface.
+* **Question Ordering:** Survey questions are preserved in the order configured by the creator.
+* **Company Branding:** Set a company name that flows throughout participant-facing experiences.
+* **Session Titles:** Optionally give interviews custom titles.
 
 ---
 
 ### 👥 Participant Management
 
-* **Configurable Participant Count:** Choose predefined participant numbers or enter a custom amount.
-* **Sequential Interviews:** Participants complete the survey one at a time.
-* **Automatic Progression:** Submitting one participant automatically advances the interview session.
-* **Live Progress Tracking:** Clearly shows the current participant and overall completion progress.
-* **Persistent Responses:** Participant answers remain available throughout the active session.
-* **Session-Based Workflow:** Designed for conducting real-world interviews on a single device.
+* **Configurable Participant Count:** Choose predefined participant counts or enter a custom amount.
+* **Sequential Interviews:** Run participant interviews one at a time.
+* **Automatic Progression:** Completed participants advance through the interview workflow.
+* **Live Progress Tracking:** Shows participant and question progress during interviews.
+* **Persistent Responses:** Responses remain available throughout the active session.
+* **Partial Sessions:** Interviews can be ended early while preserving collected responses.
+* **Session-Based Workflow:** Designed for structured real-world interview sessions.
 
 ---
 
-### 🎨 Dynamic Theme Engine
+### 🔗 Shareable Interviews
 
-InsightPulse includes a built-in theme system capable of instantly restyling the entire application.
+InsightPulse supports creating public interview links that can be shared with respondents.
+
+Creators can:
+
+* **Generate Unique Links:** Create a unique public URL for an interview.
+* **Snapshot Interview Content:** The questions and company information are stored with the shared interview at creation time.
+* **Set Respondent Limits:** Choose how many respondents a shared link can accept.
+* **Copy Links Easily:** Copy generated links directly from the share manager.
+* **View Link Status:** See whether a link is open, closed, or has reached its respondent cap.
+* **End Interviews Early:** Immediately stop a shared interview.
+* **Reopen Interviews:** Re-enable a previously ended shared interview.
+* **View Link Results:** View responses collected through a specific shared interview.
+* **Delete Shared Interviews:** Permanently remove old share links and their collected responses.
+
+Respondents do **not** need an InsightPulse account.
+
+Public interviews are available through routes such as:
+
+```text
+https://insight-pulse-nu.vercel.app/i/<slug>
+```
+
+---
+
+### 🧮 Respondent Cap Protection
+
+Shared interviews use a server-side response counter and an atomic PostgreSQL slot-claim function.
+
+This prevents race conditions where multiple respondents submit at nearly the same time and accidentally exceed the configured respondent limit.
+
+The database locks the shared interview row while claiming a response slot, ensuring the cap is enforced correctly even under concurrent submissions.
+
+---
+
+### 🔐 Authentication
+
+Creator features require an authenticated account.
+
+InsightPulse supports:
+
+* **Google OAuth**
+* **Email + Password authentication**
+* **Supabase Auth session management**
+* **Protected creator API routes**
+* **Creator-only share management**
+
+Respondents remain anonymous and never need to sign in.
+
+Creator authentication and user sessions are handled through **Supabase Auth**.
+
+---
+
+### 🛡️ Bot Protection
+
+Email-based creator authentication is protected using **Cloudflare Turnstile**.
+
+Turnstile is used to reduce automated sign-up and sign-in abuse while keeping the authentication experience lightweight for legitimate users.
+
+---
+
+### 💾 Cloud Data Persistence
+
+InsightPulse now supports cloud-backed creator workspace persistence through Supabase.
+
+The creator's legacy application state can be synchronized to their account, allowing important configuration to survive across devices.
+
+Persistent workspace data can include:
+
+* Company configuration
+* Survey questions
+* Participant configuration
+* Participant responses
+* Interview progress
+* Theme preferences
+* Application settings
+* AI configuration
+
+Local browser storage is still used by parts of the legacy application, while authenticated state synchronization provides an additional cloud-backed persistence layer.
+
+---
+
+## 🎨 Dynamic Theme Engine
+
+InsightPulse includes a built-in theme system capable of instantly restyling the application.
 
 Available themes include:
 
@@ -70,13 +161,11 @@ Available themes include:
 * 😌 **Relaxing**
 * 🤖 **Tech**
 
-Themes dynamically affect both the administration dashboard and participant interview experience.
-
-Users can also change themes while an interview session is active.
+Themes can be changed dynamically during normal application usage and interviews.
 
 ---
 
-### 🔊 Audio Feedback
+## 🔊 Audio Feedback
 
 InsightPulse uses the browser's **Web Audio API** to generate lightweight interface sound effects.
 
@@ -84,22 +173,23 @@ Audio feedback can be used for:
 
 * Button interactions
 * Form transitions
-* Survey submissions
-* Interface actions
+* Survey actions
+* Interface events
+* Submission feedback
 
-A built-in mute/unmute control allows users to disable the effects whenever needed.
+A built-in sound toggle allows users to disable interface audio when needed.
 
-No external audio files are required for the interface sound system.
+No external audio files are required for the core interface sound system.
 
 ---
 
-## 🤖 Gemini AI Assistant
+## 🤖 Gemini AI
 
-InsightPulse includes optional integration with the **Google Gemini API** for AI-powered survey analysis and automation.
+InsightPulse includes optional integration with the **Google Gemini API** for AI-powered survey analysis, question generation, and application assistance.
 
 ### 🧠 Response Synthesis
 
-The AI assistant can analyze submitted participant responses and generate insights such as:
+Gemini can analyze collected responses and generate insights such as:
 
 * Overall sentiment
 * Common themes
@@ -111,52 +201,99 @@ The AI assistant can analyze submitted participant responses and generate insigh
 
 ### ✍️ Question Generation
 
-Users can provide a topic or description and have the AI generate tailored interview questions.
+Creators can provide a topic or description and have Gemini generate interview questions.
 
-This can help quickly create surveys for different research topics, companies, products, or customer-feedback scenarios.
+This can help quickly create surveys for:
+
+* Workplace research
+* Customer feedback
+* Product research
+* Employee surveys
+* Company culture research
+* General interview workflows
 
 ### 🎛️ Smart App Control
 
-The AI assistant can also interpret conversational commands to control parts of the application.
+The AI assistant can interpret conversational commands and control supported parts of the application.
 
-For example:
+Examples include:
 
-> "Switch to Neon theme and summarize response trends."
+> "Switch to Neon theme."
 
-This allows the AI assistant to combine application control with response analysis.
+> "Set participants to 10."
 
----
+> "Generate questions about workplace burnout."
 
-## 🔐 Gemini API Configuration
+> "Summarize response trends."
 
-InsightPulse provides an interface for configuring a Google Gemini API key and selecting the desired Gemini model.
-
-Example supported models include:
-
-* `gemini-2.5-flash`
-* `gemini-2.5-pro`
-
-The API configuration is intended for personal or controlled usage.
-
-**Important:** Because this is a frontend-only application, API keys entered into the browser should be treated as exposed to the client. For production enterprise deployment, API requests should ideally be routed through a secure backend or serverless API layer rather than exposing the key directly in the browser.
+This combines natural-language interaction with application state control.
 
 ---
 
-## 💾 Data Persistence
+## 🌍 Interview Translation
 
-InsightPulse uses browser-based storage to maintain application state during use.
+InsightPulse includes interview translation support using the **MyMemory Translation API**.
 
-Persistent state can include:
+Supported languages include a range of commonly used languages such as:
 
-* Company configuration
-* Survey questions
-* Participant configuration
-* Participant responses
-* Interview progress
-* Theme preferences
-* Application settings
+* English
+* Danish
+* German
+* French
+* Spanish
+* Italian
+* Portuguese
+* Dutch
+* Polish
+* Russian
+* Arabic
+* Hindi
+* Japanese
+* Korean
+* Chinese
+* Turkish
+* Swedish
+* Persian
+* and others
 
-This allows the application to recover from normal page refreshes without requiring a traditional database.
+Translation is available directly from the participant interview interface.
+
+---
+
+## 📈 Response Management
+
+InsightPulse supports several ways of reviewing collected responses.
+
+### 📊 Standard Results
+
+The creator dashboard can display collected responses from interview sessions and provides tools for reviewing participant feedback.
+
+### 🔗 Shared Interview Results
+
+Each shareable interview has its own response collection.
+
+Creators can open the results for a specific shared link and review aggregated response information based on the questions used by that link.
+
+### 📦 Export
+
+Response data can also be exported as JSON from the creator interface.
+
+---
+
+## 🗑️ Share Management
+
+Creators can manage their previously generated public interviews directly from the share manager.
+
+Each share can be:
+
+* Copied
+* Opened through its public URL
+* Reviewed through its results
+* Ended early
+* Reopened
+* Permanently deleted
+
+Deleting a shared interview also removes the responses associated with that shared interview through the database relationship.
 
 ---
 
@@ -173,74 +310,80 @@ The responsive UI adapts:
 * Modals
 * AI controls
 * Theme controls
+* Authentication UI
+* Share management
 * Admin panels
+* Public respondent interviews
 
-The goal is to keep both administration and participant experiences clean and usable on desktop and smaller displays.
+The goal is to keep both the creator and respondent experiences clean and usable on desktop and smaller displays.
+
+---
+
+## 🏗️ Architecture
+
+InsightPulse began as a single-file frontend application and was later migrated into a Next.js application.
+
+The current architecture combines the newer platform layer with the preserved legacy frontend.
+
+```text
+Next.js Application
+        │
+        ├── Creator Workspace
+        │      │
+        │      ├── Supabase Authentication
+        │      ├── Workspace State Sync
+        │      ├── Survey Builder
+        │      ├── AI Assistant
+        │      └── Share Manager
+        │
+        ├── Public Respondent Routes
+        │      │
+        │      └── /i/[slug]
+        │
+        ├── Server API Routes
+        │      │
+        │      ├── Authentication
+        │      ├── Workspace State
+        │      ├── Shared Interviews
+        │      ├── Responses
+        │      └── Gemini Proxy
+        │
+        ├── Supabase
+        │      │
+        │      ├── Auth
+        │      ├── PostgreSQL
+        │      └── Atomic response-slot claiming
+        │
+        └── Preserved Legacy Frontend
+               │
+               ├── HTML
+               ├── CSS
+               ├── JavaScript
+               ├── Themes
+               ├── Interview UI
+               └── Audio / UI systems
+```
 
 ---
 
 ## 🛠️ Tools & Technologies Used
 
-* **HTML5** — Application structure
+* **Next.js 14** — Application framework and server-side API routes
+* **React 18** — Application shell and platform integration
+* **JavaScript** — Application logic and legacy state management
+* **HTML5** — Interface structure
 * **CSS3** — Responsive UI, animations, themes, and visual design
-* **JavaScript** — Application logic and state management
+* **Supabase** — Authentication, PostgreSQL database, and server-side persistence
+* **Supabase SSR / Client Libraries** — Authentication and browser/server integration
+* **Cloudflare Turnstile** — Bot protection for creator authentication
+* **Google Gemini API** — AI analysis, question generation, and assistant functionality
+* **MyMemory API** — Interview translation
 * **Web Audio API** — Dynamic interface sound effects
-* **localStorage** — Client-side persistence
-* **Google Gemini API** — AI analysis and question generation
-* **Vercel** — Deployment
+* **localStorage** — Legacy client-side persistence
+* **Vercel** — Deployment and hosting
 * **GitHub** — Source control and project hosting
 * **VS Code** — Development environment
 * **AI Assistance** — Development, debugging, architecture, and UI/UX iteration
-
----
-
-## ▶️ How to Run Locally
-
-InsightPulse is completely contained inside a single HTML file.
-
-### Option 1 — Open Directly
-
-Download or clone the repository and open:
-
-```text
-index.html
-```
-
-in a modern web browser.
-
-### Option 2 — VS Code + Live Server
-
-Recommended for development:
-
-1. Clone the repository.
-2. Open the project in VS Code.
-3. Install the **Live Server** extension.
-4. Right-click `index.html`.
-5. Select **Open with Live Server**.
-
-The application should open at an address similar to:
-
-```text
-http://127.0.0.1:5500/index.html
-```
-
----
-
-## ☁️ Vercel Deployment
-
-InsightPulse can be deployed directly to Vercel without a traditional build system.
-
-### Deploy with GitHub
-
-1. Push the repository to GitHub.
-2. Open Vercel.
-3. Import the GitHub repository.
-4. Select the project.
-5. Deploy.
-
-Because the application is a standalone HTML project, no complicated build configuration is required.
-
-After deployment, Vercel provides a public URL for accessing the application.
 
 ---
 
@@ -249,65 +392,190 @@ After deployment, Vercel provides a public URL for accessing the application.
 ```text
 insightpulse/
 │
-├── index.html        # Complete InsightPulse application
-├── README.md         # Project documentation
-└── screenshots/      # Optional project screenshots
+├── app/
+│   ├── api/                # Server API routes
+│   ├── i/[slug]/           # Public shared interview route
+│   ├── login/              # Creator authentication
+│   └── ...
+│
+├── components/
+│   └── AppShell.js         # Next.js shell for the preserved legacy app
+│
+├── lib/
+│   ├── supabase/           # Supabase clients and server helpers
+│   └── ...
+│
+├── public/
+│   └── legacy/
+│       ├── app.js          # Original application logic
+│       ├── features.js     # New feature layer
+│       ├── app.css         # Legacy styling
+│       └── body.html       # Preserved application markup
+│
+├── supabase-schema.sql     # Database schema
+├── .env.example            # Environment variable template
+├── next.config.js          # Next.js configuration
+├── package.json            # Project dependencies and scripts
+└── README.md               # Project documentation
 ```
 
-The entire application is intentionally contained inside `index.html`, including:
+The legacy frontend is intentionally preserved inside `public/legacy` while the newer Next.js platform layer provides authentication, APIs, persistence, sharing, and server-side functionality.
+
+---
+
+## 🔑 Environment Variables
+
+The project uses environment variables for platform configuration.
+
+A template is provided in:
 
 ```text
-HTML
-CSS
-JavaScript
-Application State
-Theme System
-Survey Builder
-Interview Mode
-AI Integration
-Web Audio Feedback
-Persistence
+.env.example
 ```
+
+Typical configuration includes values for:
+
+```text
+Supabase
+Cloudflare Turnstile
+Google Gemini
+```
+
+Sensitive credentials should never be committed to GitHub.
+
+---
+
+## ▶️ How to Run Locally
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/ArtinSHF/InsightPulse.git
+cd InsightPulse
+```
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Configure environment variables
+
+Create:
+
+```text
+.env.local
+```
+
+using `.env.example` as a reference.
+
+Add the required Supabase, Turnstile, and optional AI configuration values.
+
+### 4. Set up Supabase
+
+Create a Supabase project and run:
+
+```text
+supabase-schema.sql
+```
+
+inside:
+
+```text
+Supabase Dashboard → SQL Editor
+```
+
+The schema creates the tables and database functions required by the application.
+
+### 5. Start the development server
+
+```bash
+npm run dev
+```
+
+The application should then be available at:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## ☁️ Vercel Deployment
+
+InsightPulse is designed to work with Vercel and GitHub.
+
+### Deploy with GitHub
+
+1. Push the repository to GitHub.
+2. Open Vercel.
+3. Import the GitHub repository.
+4. Make sure the project uses the **Next.js** framework preset.
+5. Add the required environment variables.
+6. Deploy.
+
+After the repository is connected, new commits pushed to the production branch can automatically trigger new Vercel deployments.
 
 ---
 
 ## 🔄 Application Flow
 
+### Creator Flow
+
 ```text
-Admin Dashboard
-       │
-       ├── Set Company
-       │
-       ├── Configure Participants
-       │
-       ├── Create Questions
-       │
-       ├── Configure AI
-       │
-       └── Start Interview
-               │
-               ▼
-        Participant 1
-               │
-             Submit
-               │
-               ▼
-        Participant 2
-               │
-             Submit
-               │
-              ...
-               │
-               ▼
-        Final Participant
-               │
-             Submit
-               │
-               ▼
-       Response Analysis
-               │
-               ▼
-        Gemini AI Insights
+Creator
+   │
+   ▼
+Sign In / Sign Up
+   │
+   ├── Google OAuth
+   └── Email + Password
+          │
+          ▼
+     Supabase Auth
+          │
+          ▼
+    Creator Workspace
+          │
+          ├── Configure Company
+          ├── Configure Participants
+          ├── Create Questions
+          ├── Configure AI
+          └── Create Share Link
+                     │
+                     ▼
+             Public Interview URL
+```
+
+### Respondent Flow
+
+```text
+Public Share Link
+        │
+        ▼
+   Fetch Shared Interview
+        │
+        ▼
+  Respondent Interview
+        │
+        ├── Question 1
+        ├── Question 2
+        ├── Question 3
+        └── ...
+                │
+                ▼
+          Submit Answers
+                │
+                ▼
+      Atomic Slot Claim
+                │
+         ┌──────┴──────┐
+         │             │
+       Success       Closed
+         │             │
+         ▼             ▼
+    Thank You       Closed Screen
 ```
 
 ---
@@ -336,7 +604,55 @@ These question types can be combined within the same survey.
 | Relaxing | Soft and calm visual design              |
 | Tech     | Futuristic technology-inspired interface |
 
-Themes are applied dynamically without requiring a page reload.
+Themes are applied dynamically without requiring a full page reload.
+
+---
+
+## 🔐 Security & Privacy
+
+InsightPulse now uses server-side APIs and authentication rather than being purely client-side.
+
+Important protections include:
+
+* Supabase Auth for creator accounts
+* Owner checks on creator-only API routes
+* Cloudflare Turnstile for email authentication
+* Server-side access to Supabase service-role functionality
+* Anonymous respondent submissions through controlled API routes
+* Database-level response-cap enforcement
+* Server-side Gemini API proxying
+* Row-level security enabled on Supabase tables
+* No public database policy for direct respondent access
+
+Sensitive credentials should still be kept in environment variables and never committed to the repository.
+
+---
+
+## ⚠️ Important Security Note
+
+The application uses a server-side architecture for sensitive integrations.
+
+Gemini requests can be routed through a Next.js server API route so that server-side credentials do not need to be embedded directly into the browser.
+
+Supabase service-role credentials must also remain server-side.
+
+The general production architecture is:
+
+```text
+Browser
+   │
+   ▼
+Next.js Application
+   │
+   ├── Supabase Server APIs
+   ├── Gemini Server Proxy
+   └── Share / Response APIs
+          │
+          ▼
+       Supabase
+```
+
+This keeps sensitive credentials away from public client-side code.
 
 ---
 
@@ -344,44 +660,42 @@ Themes are applied dynamically without requiring a page reload.
 
 **Active development / Experimental Portfolio Project**
 
-InsightPulse is currently designed as a frontend-focused survey and interview platform.
+InsightPulse has evolved from a simple single-file frontend experiment into a full-stack survey and interview platform.
+
+Current functionality includes:
+
+* Survey creation
+* Participant interviews
+* Themes
+* Audio feedback
+* Gemini AI
+* Google authentication
+* Email/password authentication
+* Cloudflare Turnstile
+* Supabase persistence
+* Public share links
+* Anonymous respondents
+* Respondent limits
+* Atomic response-cap protection
+* End/reopen share links
+* Delete share links
+* Per-link results
+* Translation support
+* JSON export
+* Vercel deployment
 
 Future development could include:
 
-* Secure backend API integration
-* Database-backed survey storage
-* Multi-user authentication
 * Organization and team accounts
-* Cloud-based response synchronization
 * Advanced analytics dashboards
-* Exporting responses to CSV/JSON
+* More export formats
+* Richer collaboration tools
 * Role-based permissions
-* Server-side Gemini API integration
+* More detailed survey analytics
+* Additional authentication providers
+* Improved respondent analytics
 * Real-time collaborative interviews
-
----
-
-## ⚠️ Important Security Note
-
-InsightPulse is primarily a client-side application.
-
-If a Gemini API key is entered directly into the frontend, it may be accessible to users through browser developer tools or network requests.
-
-For a real enterprise deployment, sensitive API credentials should **not** be embedded directly in the client application.
-
-A recommended production architecture would be:
-
-```text
-InsightPulse Frontend
-        │
-        ▼
-Secure Backend / Vercel Function
-        │
-        ▼
-Google Gemini API
-```
-
-This keeps sensitive credentials on the server rather than exposing them to the browser.
+* Custom branding and organization settings
 
 ---
 
@@ -389,17 +703,22 @@ This keeps sensitive credentials on the server rather than exposing them to the 
 
 Building InsightPulse provided hands-on experience with:
 
-* **Complex Frontend State Management:** Managing survey configuration, participants, responses, themes, AI settings, and application state in a single-page application.
-* **Dynamic UI Architecture:** Creating multiple application modes that share the same underlying state.
-* **Design Systems:** Building a reusable theme engine capable of restyling the entire application instantly.
+* **Next.js Architecture:** Migrating an existing frontend application into a modern Next.js project.
+* **Complex Frontend State Management:** Managing survey configuration, participants, responses, themes, AI settings, and application state.
+* **Authentication Systems:** Implementing account creation, sign-in, sessions, OAuth, and protected creator features.
+* **Supabase:** Using hosted PostgreSQL, authentication, server-side APIs, and database functions.
+* **Public Share Systems:** Designing shareable interview links that work without requiring respondents to create accounts.
+* **Database Concurrency:** Using an atomic PostgreSQL function to safely enforce respondent limits.
+* **Dynamic UI Architecture:** Connecting a preserved legacy frontend to a newer platform layer.
+* **Design Systems:** Building a reusable theme engine capable of restyling the application instantly.
 * **Responsive UI/UX:** Designing interfaces that remain usable across different screen sizes.
-* **Browser APIs:** Using the Web Audio API to generate interface feedback without external audio assets.
-* **Client-Side Persistence:** Using localStorage to preserve important application state.
-* **AI Integration:** Connecting a frontend application to Google's Gemini API for analysis and automated content generation.
-* **Conversational Application Control:** Designing AI interactions that can interpret commands and modify application state.
-* **Survey Architecture:** Creating a flexible question system supporting multiple question formats.
+* **Browser APIs:** Using the Web Audio API for interface feedback.
+* **Client + Cloud Persistence:** Combining legacy local browser state with authenticated cloud synchronization.
+* **AI Integration:** Connecting Gemini to survey generation, analysis, and conversational application control.
+* **API Architecture:** Creating server-side routes for authentication, sharing, responses, AI, and state management.
+* **Bot Protection:** Integrating Cloudflare Turnstile into authentication flows.
 * **Sequential Workflows:** Building participant-by-participant interview execution and progress tracking.
-* **Single-File Application Architecture:** Organizing a complete application containing HTML, CSS, JavaScript, state management, UI systems, and integrations inside one file.
+* **Legacy Migration:** Preserving an existing application while progressively moving functionality into a modern full-stack architecture.
 
 ---
 
@@ -407,7 +726,7 @@ Building InsightPulse provided hands-on experience with:
 
 This project is an independent development and portfolio project.
 
-Feel free to explore the code and use it as inspiration for your own frontend experiments.
+Feel free to explore the code and use it as inspiration for your own web development experiments.
 
 ---
 
@@ -415,4 +734,4 @@ Feel free to explore the code and use it as inspiration for your own frontend ex
 
 If you found InsightPulse interesting, consider giving the repository a ⭐ on GitHub!
 
-Built with HTML, CSS, JavaScript, and a ridiculous amount of frontend engineering. 🚀
+Built with Next.js, React, Supabase, JavaScript, Gemini, and a ridiculous amount of frontend engineering. 🚀
