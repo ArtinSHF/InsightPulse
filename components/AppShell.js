@@ -107,16 +107,29 @@ export default function AppShell({ shareSlug = null }) {
     const script = document.createElement('script');
     script.src = '/legacy/app.js';
     script.defer = true;
+
+    script.onload = () => {
+      const featuresScript = document.createElement('script');
+      featuresScript.src = '/legacy/features.js';
+      featuresScript.onload = () => {
+        // Respondent / creator initialization happens only after both scripts exist.
+        initializeApp();
+      };
+      document.body.appendChild(featuresScript);
+    };
+
     document.body.appendChild(script);
 
-    (async () => {
+    async function initializeApp() {
       const { data } = await supabase.auth.getSession();
       IPS.user = data?.session?.user || null;
 
       if (respondentMode) {
-        // Public fetch — no auth. 410 => closed, 404 => invalid link.
         try {
-          const res = await fetch('/api/shares/slug/' + encodeURIComponent(shareSlug));
+          const res = await fetch(
+            '/api/shares/slug/' + encodeURIComponent(shareSlug)
+          );
+
           if (res.ok) {
             IPS.share = await res.json();
           } else if (res.status === 410) {
@@ -128,17 +141,25 @@ export default function AppShell({ shareSlug = null }) {
         } catch (e) {
           IPS.share = null;
         }
-        // Re-render respondent screens once data is in (script may already have run).
-        if (typeof window.ipRespondentInit === 'function' && IPS.share && !IPS.share.closed) {
+
+        if (
+          typeof window.ipRespondentInit === 'function' &&
+          IPS.share &&
+          !IPS.share.closed
+        ) {
           window.ipRespondentInit(IPS.share);
-        } else if (typeof window.ipShowClosed === 'function' && (!IPS.share || IPS.share.closed)) {
+        } else if (
+          typeof window.ipShowClosed === 'function' &&
+          (!IPS.share || IPS.share.closed)
+        ) {
           window.ipShowClosed(IPS.share);
         }
       } else {
-        // Creator: refresh auth area once the session is known.
-        if (typeof window.ipRenderAuthArea === 'function') window.ipRenderAuthArea();
+        if (typeof window.ipRenderAuthArea === 'function') {
+          window.ipRenderAuthArea();
+        }
       }
-    })();
+    }
   }, [bodyHtml, shareSlug]);
 
   if (!bodyHtml) {
