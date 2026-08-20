@@ -111,6 +111,7 @@ async function loadShareList() {
             '<button class="btn sm" data-results="' + r.id + '">📊 Results</button>' +
             (r.is_active ? '<button class="btn warn sm" data-end="' + r.id + '">⏹ End</button>'
                          : '<button class="btn sm" data-reopen="' + r.id + '">↻ Reopen</button>') +
+            '<button class="btn danger sm" data-delete="' + r.id + '">🗑 Delete</button>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -129,6 +130,36 @@ async function loadShareList() {
     });
     box.querySelectorAll('[data-results]').forEach(function (b) {
       b.addEventListener('click', function () { openShareResults(b.getAttribute('data-results')); });
+    });
+    box.querySelectorAll('[data-delete]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        const id = b.getAttribute('data-delete');
+
+        if (!confirm(
+          'Delete this shared interview?\n\n' +
+          'The link will stop working and all responses collected through it will be permanently deleted.\n\n' +
+          'This cannot be undone.'
+        )) return;
+
+        try {
+          const res = await window.IPS.api('/api/shares/' + id, {
+            method: 'DELETE'
+          });
+
+          const d = await res.json().catch(function () { return {}; });
+
+          if (!res.ok) {
+            throw new Error(d.error || ('Error ' + res.status));
+          }
+
+          toast('Share deleted ✓', 'success');
+          sfx('submit');
+          loadShareList();
+        } catch (e) {
+          toast(e.message, 'error');
+          sfx('error');
+        }
+      });
     });
   } catch (e) {
     box.innerHTML = '<div class="muted">Could not load links: ' + escapeHtml(e.message) + '</div>';
