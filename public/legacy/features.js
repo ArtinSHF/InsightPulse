@@ -217,6 +217,12 @@ function ipShowClosed(share, msg) {
 
 /* ---------- Respondent boot: configure interview shell, hide creator UI ---------- */
 function ipRespondentInit(share) {
+  document.getElementById('ipClosed').classList.add('hidden');
+  document.getElementById('ipThankYou').classList.add('hidden');
+  document.getElementById('interviewShell').classList.remove('hidden');
+  document.getElementById('landingView').classList.add('hidden');
+  document.getElementById('adminView').classList.add('hidden');
+
   State.company = share.company;
   State.questions = share.questions || [];
   State.participants = 1;
