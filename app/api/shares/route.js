@@ -41,6 +41,9 @@ export async function POST(req) {
       company: company.slice(0, 200),
       questions,
       max_respondents: cap,
+      responses_count: 0,
+      is_active: true,
+      closed_at: null,
     })
     .select()
     .single();
