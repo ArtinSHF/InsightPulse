@@ -1,0 +1,286 @@
+<!-- ================== TOP NAVIGATION ================== -->
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand" id="brandHome" style="cursor:pointer;" title="Back to home">
+      <div class="brand-logo">IP</div>
+      <div>InsightPulse <div class="muted" style="font-size:11px;font-weight:500;">Enterprise Survey Suite</div></div>
+    </div>
+    <div class="nav-actions">
+      <span id="ipAuthArea" class="inline-row" style="margin:0;"></span>
+      <div class="theme-picker" id="themePicker">
+        <div class="swatch active" data-t="light" title="Light"></div>
+        <div class="swatch" data-t="dark" title="Dark"></div>
+        <div class="swatch" data-t="neon" title="Neon"></div>
+        <div class="swatch" data-t="bright" title="Bright"></div>
+        <div class="swatch" data-t="nature" title="Nature"></div>
+        <div class="swatch" data-t="relaxing" title="Relaxing"></div>
+        <div class="swatch" data-t="tech" title="Tech"></div>
+      </div>
+      <button class="btn icon" id="sfxToggle" title="Toggle sound effects">🔊</button>
+      <button class="btn icon" id="btnOpenSettings" title="Settings — AI configuration, translation, factory reset">⚙</button>
+      <button class="btn" id="btnOpenAI">🤖 AI Assistant</button>
+      <button class="btn primary" id="btnLaunch">▶ Launch Interviews</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================== LANDING VIEW (default) ================== -->
+<div class="landing" id="landingView">
+  <div class="landing-inner">
+    <div class="landing-badge"><span class="dot"></span> Enterprise Survey &amp; Interview Suite</div>
+    <h1 class="landing-title">Insight that pulses<br/>through every conversation.</h1>
+    <p class="landing-sub">Design branded interviews, run them across your team, and let AI synthesize the signal — all in a single, private, browser-native workspace.</p>
+    <div class="landing-cards">
+      <div class="landing-card" id="btnGoEdit" role="button" tabindex="0">
+        <div class="lc-icon">🧱</div>
+        <h3>Edit Mode</h3>
+        <p>Build questions, configure sessions, review results and synthesize insights.</p>
+        <span class="lc-cta">Enter workspace</span>
+      </div>
+      <div class="landing-card" id="btnGoInterview" role="button" tabindex="0">
+        <div class="lc-icon">🎙</div>
+        <h3>Interview Mode</h3>
+        <p>Launch a live participant flow with real-time translation and branded UI.</p>
+        <span class="lc-cta">Start interviews</span>
+      </div>
+    </div>
+    <div class="landing-meta">
+      <span><strong id="landStatQ">0</strong> questions ready</span>
+      <span><strong id="landStatS">0</strong> saved sessions</span>
+      <span><strong id="landStatR">0</strong> responses stored</span>
+    </div>
+  </div>
+</div>
+
+<!-- ================== MAIN ADMIN VIEW ================== -->
+<div class="container hidden" id="adminView">
+
+  <div class="hero">
+    <div>
+      <h1>Design your next enterprise interview</h1>
+      <p>Build a fully branded, multi-question, multi-participant interview experience — with live theming, AI-generated questions, and post-session synthesis powered by Google Gemini.</p>
+    </div>
+    <div class="inline-row">
+      <div class="stat"><div class="num" id="stat-q">0</div><div class="lbl">Questions</div></div>
+      <div class="stat"><div class="num" id="stat-p">5</div><div class="lbl">Participants</div></div>
+      <div class="stat"><div class="num" id="stat-r">0</div><div class="lbl">Responses</div></div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="build">🧱 Build</button>
+    <button class="tab" data-tab="results">📊 Results</button>
+  </div>
+
+  <!-- ============= BUILD TAB ============= -->
+  <div id="tab-build">
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>Company & Session</h2>
+        <div class="subtitle">Branding that flows through every participant view.</div>
+        <div class="field">
+          <label>Target company name</label>
+          <input type="text" id="companyName" placeholder="e.g. Acme Corporation" />
+        </div>
+        <div class="field">
+          <label>Session title (optional)</label>
+          <input type="text" id="sessionTitle" placeholder="Q3 Culture Interview" />
+        </div>
+        <div class="field">
+          <label>Number of interviewees</label>
+          <div class="inline-row">
+            <button class="btn sm participant-preset" data-n="5">5</button>
+            <button class="btn sm participant-preset" data-n="15">15</button>
+            <button class="btn sm participant-preset" data-n="30">30</button>
+            <input type="number" id="participantCount" min="1" max="500" value="5" style="width:100px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Add Questions</h2>
+        <div class="subtitle">Mix any combination of formats. Sequence is preserved.</div>
+        <div class="inline-row">
+          <button class="btn" data-add="mc">➕ Multiple Choice</button>
+          <button class="btn" data-add="likert">➕ Likert (5-point)</button>
+          <button class="btn" data-add="text">➕ Free Text</button>
+        </div>
+        <hr class="sep"/>
+        <div class="row-between">
+          <div class="muted">Tip: use the AI panel to auto-generate a question set from a topic.</div>
+          <button class="btn ghost sm" id="btnClearQs">Clear all</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="row-between" style="margin-bottom:14px;">
+        <div>
+          <h2 style="margin:0;">Question Sequence</h2>
+          <div class="muted">These will be shown to every participant in order.</div>
+        </div>
+        <div class="chip"><span id="qCount">0</span> question(s)</div>
+      </div>
+      <div id="qList"></div>
+      <div id="qEmpty" class="muted" style="text-align:center;padding:30px;">No questions yet — add one above or ask the AI assistant.</div>
+    </div>
+  </div>
+
+  <!-- ============= AI TAB (removed — moved to Settings modal) ============= -->
+  <!-- Hidden inputs preserved so existing bindings still work for state hydration -->
+  <div id="tab-ai" class="hidden">
+    <input type="hidden" id="aiTopic" />
+    <input type="hidden" id="aiQCount" value="6" />
+  </div>
+
+  <!-- ============= RESULTS TAB ============= -->
+  <div id="tab-results" class="hidden">
+    <div class="card">
+      <div class="row-between results-header" style="margin-bottom:16px;">
+        <div>
+          <h2 style="margin:0;">Collected Responses</h2>
+          <div class="muted"><span id="respSummary">No responses yet.</span></div>
+        </div>
+        <div class="inline-row">
+          <select id="sessionPicker" class="lang-select" title="Select interview session" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:13px;min-width:180px;">
+            <option value="">All sessions</option>
+          </select>
+          <button class="btn" id="btnExport">⬇ Export JSON</button>
+          <button class="btn primary" id="btnSynthesize">✨ AI Synthesize</button>
+        </div>
+      </div>
+      <div id="resultsBox"></div>
+    </div>
+    <div class="card hidden" id="aiSynthCard" style="margin-top:20px;">
+      <h2>AI Synthesis</h2>
+      <div class="subtitle">Sentiment, themes, key statistics.</div>
+      <div id="aiSynthOutput" style="white-space:pre-wrap;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================== INTERVIEW SHELL ================== -->
+<div class="interview-shell hidden" id="interviewShell">
+  <div class="interview-head">
+    <div>
+      <div class="company-title" id="ivCompany">Company</div>
+      <div class="muted" id="ivSubtitle">Session</div>
+    </div>
+    <div class="inline-row">
+      <div class="chip" id="ivProgress">Participant 1 / 5</div>
+      <div class="chip hidden" id="ivTranslating">🌐 Translating…</div>
+      <label class="chip" style="cursor:pointer;gap:4px;" title="Interview language">
+        🌐
+        <select id="ivLang" class="lang-select">
+          <option value="en">English</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+          <option value="de">Deutsch</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Português</option>
+          <option value="nl">Nederlands</option>
+          <option value="pl">Polski</option>
+          <option value="ru">Русский</option>
+          <option value="ar">العربية</option>
+          <option value="hi">हिन्दी</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+          <option value="zh-CN">中文(简体)</option>
+          <option value="tr">Türkçe</option>
+          <option value="id">Bahasa Indonesia</option>
+          <option value="vi">Tiếng Việt</option>
+          <option value="th">ไทย</option>
+          <option value="uk">Українська</option>
+          <option value="sv">Svenska</option>
+          <option value="da">Dansk</option>
+          <option value="fa">فارسی</option>
+        </select>
+      </label>
+      <button class="btn warn" id="btnEndEarly" title="Stop the session now and compile partial results">⏹ End Early</button>
+      <div class="theme-picker" id="themePickerIV">
+        <div class="swatch active" data-t="light"></div>
+        <div class="swatch" data-t="dark"></div>
+        <div class="swatch" data-t="neon"></div>
+        <div class="swatch" data-t="bright"></div>
+        <div class="swatch" data-t="nature"></div>
+        <div class="swatch" data-t="relaxing"></div>
+        <div class="swatch" data-t="tech"></div>
+      </div>
+      <button class="btn danger" id="btnExitIV">Exit</button>
+    </div>
+  </div>
+  <div class="interview-body">
+    <div class="interview-card">
+      <div class="progress-bar"><div class="progress-fill" id="ivFill" style="width:0%"></div></div>
+      <div id="ivContent"></div>
+      <div class="inline-row" style="justify-content:space-between;margin-top:24px;">
+        <button class="btn ghost" id="ivPrev">← Previous</button>
+        <button class="btn primary" id="ivNext">Next →</button>
+      </div>
+    </div>
+  </div>
+  <div class="powered-by">Powered by <span>InsightPulse</span></div>
+</div>
+
+<!-- ================== RESPONDENT SCREENS (new) ================== -->
+<div class="interview-shell hidden" id="ipThankYou">
+  <div class="interview-body">
+    <div class="interview-card" style="text-align:center;padding:60px 40px;">
+      <div style="font-size:52px;margin-bottom:14px;">🎉</div>
+      <h2 id="ipTyText" style="margin:0 0 8px;font-size:22px;line-height:1.4;"></h2>
+      <p class="muted" style="margin:0 0 24px;">Your responses have been recorded.</p>
+      <button class="btn primary" onclick="window.location.href='/'">🏠 Go to homepage</button>
+      <div class="muted" style="font-size:12px;margin-top:10px;">Optional — check out InsightPulse yourself.</div>
+    </div>
+  </div>
+  <div class="powered-by">Powered by <span>InsightPulse</span></div>
+</div>
+
+<div class="interview-shell hidden" id="ipClosed">
+  <div class="interview-body">
+    <div class="interview-card" style="text-align:center;padding:60px 40px;">
+      <div style="font-size:52px;margin-bottom:14px;">🔒</div>
+      <h2 id="ipClosedMsg" style="margin:0 0 8px;font-size:22px;line-height:1.4;">This interview is closed.</h2>
+      <p class="muted" style="margin:0;">It has reached its respondent limit or been ended by the creator.</p>
+    </div>
+  </div>
+  <div class="powered-by">Powered by <span>InsightPulse</span></div>
+</div>
+
+<!-- ================== AI DRAWER ================== -->
+<div class="ai-drawer" id="aiDrawer">
+  <div class="ai-head">
+    <div>
+      <div style="font-weight:800;font-size:16px;">🤖 InsightPulse AI</div>
+      <div class="muted" style="font-size:12px;">Gemini-powered assistant</div>
+    </div>
+    <button class="btn icon" id="btnCloseAI">✕</button>
+  </div>
+  <div class="ai-body" id="aiBody">
+    <div class="ai-msg bot">Hi! I'm your survey copilot. Try things like:
+• "Switch to Neon theme"
+• "Generate 5 questions about workplace burnout"
+• "Summarize response trends"
+• "Set participants to 10"</div>
+  </div>
+  <div class="ai-input-row">
+    <input id="aiInput" placeholder="Ask AI or command the app…" />
+    <button class="btn primary" id="aiSend">Send</button>
+  </div>
+</div>
+
+<button class="ai-fab" id="fabAI" title="Open AI Assistant">🤖</button>
+
+<!-- ================== MODAL ================== -->
+<div class="modal-back" id="modalBack">
+  <div class="modal">
+    <div class="row-between">
+      <h2 id="modalTitle" style="margin:0;">Modal</h2>
+      <button class="btn icon" id="modalClose">✕</button>
+    </div>
+    <hr class="sep"/>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<div id="toast-holder"></div>
