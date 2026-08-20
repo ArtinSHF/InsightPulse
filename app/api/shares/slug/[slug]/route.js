@@ -16,7 +16,11 @@ export async function GET(req, { params }) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const closed = !data.is_active || data.responses_count >= data.max_respondents;
+  const isActive = data.is_active !== false;
+  const responseCount = Number(data.responses_count) || 0;
+  const maxRespondents = Number(data.max_respondents) || 1;
+  
+  const closed = !isActive || responseCount >= maxRespondents;
   if (closed) {
     return NextResponse.json(
       { closed: true, company: data.company, title: data.title },
