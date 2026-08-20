@@ -30,3 +30,28 @@ export async function PATCH(req, { params }) {
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json(data);
 }
+
+export async function DELETE(req, { params }) {
+  const user = await getUserFromRequest(req);
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const supabase = getServiceClient();
+
+  const { data, error } = await supabase
+    .from('shared_interviews')
+    .delete()
+    .eq('id', params.id)
+    .eq('owner_id', user.id)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (!data) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
