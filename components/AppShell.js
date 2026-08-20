@@ -135,6 +135,32 @@ export default function AppShell({ shareSlug = null }) {
       // Now load features.js. Its startup code can safely see IPS.share.
       const featuresScript = document.createElement('script');
       featuresScript.src = '/legacy/features.js';
+
+
+      featuresScript.onload = () => {
+        if (respondentMode) {
+          if (
+            IPS.share &&
+            !IPS.share.closed &&
+            typeof window.ipRespondentInit === 'function'
+          ) {
+            window.ipRespondentInit(IPS.share);
+          } else if (typeof window.ipShowClosed === 'function') {
+            window.ipShowClosed(
+              IPS.share,
+              IPS.share?.closed
+                ? undefined
+                : 'Unable to load this interview.'
+            );
+          }
+        } else {
+          if (typeof window.ipRenderAuthArea === 'function') {
+            window.ipRenderAuthArea();
+          }
+        }
+      };
+
+
       document.body.appendChild(featuresScript);
     };
 
