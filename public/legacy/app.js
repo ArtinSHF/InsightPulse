@@ -1402,12 +1402,30 @@ function hydrate() {
         } catch (e) { return false; }
       })();
 
-    const remote = IPS.sync._remoteState || null;
+    const remote = IPS.sync._remoteState;
     if (remote && typeof remote === 'object') {
       // Existing cloud workspace wins; local browser cache is discarded.
       __deepMergeState(State, remote);
       restoreSecrets(currentUid);
       try { localStorage.removeItem(LS_KEY); } catch (e) {}
+      IPS.sync._ownerUid = currentUid;
+      IPS.sync.ready = true;
+    } else if (remote === '__error__') {
+      // Cloud request failed (offline / server error) — this is NOT the
+      // same as "no cloud workspace yet". Fall back to this account's own
+      // local cache (read-only) and leave sync OFF so nothing gets written
+      // to the cloud until a real GET /api/state succeeds and tells us
+      // whether a row actually exists.
+      const hadCache = load(); // reads insightpulse.ws.<uid> into State
+      if (!hadCache) {
+        // No local cache for this account either — show clean defaults,
+        // but still don't mark sync ready (don't risk overwriting a cloud
+        // row we simply couldn't reach).
+        clearWorkspaceState();
+      }
+      restoreSecrets(currentUid);
+      IPS.sync._ownerUid = currentUid;
+      IPS.sync.ready = false; // scheduleSave() no-ops while this stays false
     } else if (legacyLooksReal) {
       // First-ever cloud workspace: adopt the legacy local workspace, scrub
       // the Gemini key into the per-account secrets slot, upload the rest.
@@ -1423,13 +1441,16 @@ function hydrate() {
       saveLocalCache();
       IPS.sync._flush(cloudStatePayload(State)); // immediate one-shot upload (not debounced)
       try { localStorage.removeItem(LS_KEY); } catch (e) {}
+      IPS.sync._ownerUid = currentUid;
+      IPS.sync.ready = true;
     } else {
-      // Fresh account, no legacy data: start clean (defaults + starter questions below).
+      // Confirmed (remote === null, request succeeded): fresh account, no
+      // cloud row, no legacy data — start clean.
       clearWorkspaceState();
       restoreSecrets(currentUid);
+      IPS.sync._ownerUid = currentUid;
+      IPS.sync.ready = true;
     }
-    IPS.sync._ownerUid = currentUid;
-    IPS.sync.ready = true;
   } else {
     // Signed out: behave exactly like the pre-auth app — pure local state.
     __wsKey = LS_KEY;

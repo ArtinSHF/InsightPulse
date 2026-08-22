@@ -86,12 +86,17 @@ export default function AppShell({ shareSlug = null }) {
           if (IPS.mode !== 'creator' || !IPS.user) return null;
           try {
             const res = await IPS.api('/api/state');
-            if (!res.ok) return null;
+            // res.ok false = auth/server problem, NOT "no workspace yet".
+            // /api/state's GET always returns 200 with state:null when the
+            // account simply has no row — see app/api/state/route.js.
+            if (!res.ok) return '__error__';
             const { state } = await res.json();
             IPS.sync._loaded = true;
             return state || null;
           } catch (e) {
-            return null;
+            // Network failure (offline, DNS, etc.) — same treatment as a
+            // server error: NOT "no workspace yet".
+            return '__error__';
           }
         },
       },
@@ -133,7 +138,7 @@ export default function AppShell({ shareSlug = null }) {
       //    bootstrap can treat the cloud as the source of truth.
       if (!respondentMode && IPS.user) {
         try { IPS.sync._remoteState = await IPS.sync.loadRemote(); }
-        catch (e) { IPS.sync._remoteState = null; }
+        catch (e) { IPS.sync._remoteState = '__error__'; }
       }
 
       // 3) Respondent share fetch (unchanged logic, moved earlier).
