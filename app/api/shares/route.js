@@ -12,7 +12,7 @@ export async function GET(req) {
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from('shared_interviews')
-    .select('id, slug, title, company, max_respondents, is_active, responses_count, created_at, closed_at')
+    .select('id, slug, title, company, questions, max_respondents, is_active, responses_count, created_at, closed_at')
     .eq('owner_id', user.id)
     .order('created_at', { ascending: false });
 

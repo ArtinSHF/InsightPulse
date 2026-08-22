@@ -48,6 +48,8 @@ export default function AppShell({ shareSlug = null }) {
         return fetch(path, { ...opts, headers });
       },
       signOut: async () => {
+        // Block any pending debounced save from writing under the old account.
+        try { IPS.sync.ready = false; clearTimeout(IPS.sync._timer); } catch (e) {}
         await supabase.auth.signOut();
         window.location.reload();
       },
@@ -61,19 +63,24 @@ export default function AppShell({ shareSlug = null }) {
         ready: false,
         _timer: null,
         _loaded: false,
+        _remoteState: null,   // preloaded by the boot sequence BEFORE app.js runs
+        _ownerUid: null,      // account id the current in-memory state belongs to
         // Debounced server persistence — every legacy save() call funnels here.
         scheduleSave: (state) => {
           if (IPS.mode !== 'creator' || !IPS.user || !IPS.sync.ready) return;
+          // Stale-account guard: never save state owned by a previous account.
+          if (IPS.sync._ownerUid && IPS.sync._ownerUid !== IPS.user.id) return;
           clearTimeout(IPS.sync._timer);
           IPS.sync._timer = setTimeout(() => IPS.sync._flush(state), 800);
         },
         _flush: async (state) => {
+          if (!IPS.user) return;
           try {
             await IPS.api('/api/state', {
               method: 'PUT',
               body: JSON.stringify({ state }),
             });
-          } catch (e) { /* offline-safe: localStorage still holds the data */ }
+          } catch (e) { /* offline-safe: localStorage cache still holds the data */ }
         },
         loadRemote: async () => {
           if (IPS.mode !== 'creator' || !IPS.user) return null;
@@ -103,16 +110,33 @@ export default function AppShell({ shareSlug = null }) {
 
     window.IPS = IPS;
 
-    /* ---------------- boot sequence ---------------- */
-    const script = document.createElement('script');
-    script.src = '/legacy/app.js';
-    script.defer = true;
+    /* ---------------- boot sequence ----------------
+       ORDER IS LOAD-BEARING — do not reorder:
+       1) Resolve the Supabase session FIRST so window.IPS.user is final
+          before the legacy app executes (fixes the loadRemote race where
+          local state overwrote the cloud workspace).
+       2) Preload the account's cloud workspace into IPS.sync._remoteState
+          so app.js hydrates from the account, not the browser.
+       3) (Respondent mode only) fetch the share before features.js.
+       4) Only then inject app.js, then features.js. */
+    (async () => {
+      // 1) Auth first.
+      try {
+        const { data } = await supabase.auth.getSession();
+        IPS.user = data?.session?.user || null;
+      } catch (e) {
+        IPS.user = null;
+      }
+      IPS._bootUid = IPS.user ? IPS.user.id : null; // used to detect mid-session account switches
 
-    script.onload = async () => {
-      const { data } = await supabase.auth.getSession();
-      IPS.user = data?.session?.user || null;
+      // 2) Cloud workspace preload (creators only). Awaited, so app.js's
+      //    bootstrap can treat the cloud as the source of truth.
+      if (!respondentMode && IPS.user) {
+        try { IPS.sync._remoteState = await IPS.sync.loadRemote(); }
+        catch (e) { IPS.sync._remoteState = null; }
+      }
 
-      // Fetch the share BEFORE loading features.js.
+      // 3) Respondent share fetch (unchanged logic, moved earlier).
       if (respondentMode) {
         try {
           const res = await fetch(
@@ -132,39 +156,44 @@ export default function AppShell({ shareSlug = null }) {
         }
       }
 
-      // Now load features.js. Its startup code can safely see IPS.share.
-      const featuresScript = document.createElement('script');
-      featuresScript.src = '/legacy/features.js';
+      // 4) Boot the legacy app, then features.js.
+      const script = document.createElement('script');
+      script.src = '/legacy/app.js';
+      script.defer = true;
 
+      script.onload = () => {
+        // Now load features.js. Its startup code can safely see IPS.share.
+        const featuresScript = document.createElement('script');
+        featuresScript.src = '/legacy/features.js';
 
-      featuresScript.onload = () => {
-        if (respondentMode) {
-          if (
-            IPS.share &&
-            !IPS.share.closed &&
-            typeof window.ipRespondentInit === 'function'
-          ) {
-            window.ipRespondentInit(IPS.share);
-          } else if (typeof window.ipShowClosed === 'function') {
-            window.ipShowClosed(
-              IPS.share,
-              IPS.share?.closed
-                ? undefined
-                : 'Unable to load this interview.'
-            );
+        featuresScript.onload = () => {
+          if (respondentMode) {
+            if (
+              IPS.share &&
+              !IPS.share.closed &&
+              typeof window.ipRespondentInit === 'function'
+            ) {
+              window.ipRespondentInit(IPS.share);
+            } else if (typeof window.ipShowClosed === 'function') {
+              window.ipShowClosed(
+                IPS.share,
+                IPS.share?.closed
+                  ? undefined
+                  : 'Unable to load this interview.'
+              );
+            }
+          } else {
+            if (typeof window.ipRenderAuthArea === 'function') {
+              window.ipRenderAuthArea();
+            }
           }
-        } else {
-          if (typeof window.ipRenderAuthArea === 'function') {
-            window.ipRenderAuthArea();
-          }
-        }
+        };
+
+        document.body.appendChild(featuresScript);
       };
 
-
-      document.body.appendChild(featuresScript);
-    };
-
-    document.body.appendChild(script);
+      document.body.appendChild(script);
+    })();
   }, [bodyHtml, shareSlug]);
 
   if (!bodyHtml) {

@@ -180,6 +180,73 @@ async function setShareActive(id, active) {
   } catch (e) { toast(e.message, 'error'); sfx('error'); }
 }
 
+/* ---------- Unified Results: online (shared-link) results layer ---------- */
+// Online results are NEVER persisted to the workspace blob; they are fetched
+// live into State.online so Results can aggregate local + online side by side.
+async function loadOnlineResults(force) {
+  const online = State.online;
+  if (!window.IPS || !window.IPS.user || IPSModeRespondent()) return;
+  if (online.loading) return;
+  if (online.loaded && !force) return;
+  online.loading = true;
+  online.error = null;
+  try {
+    const res = await window.IPS.api('/api/shares');
+    if (!res.ok) throw new Error('Error ' + res.status);
+    const shares = await res.json();
+    online.shares = Array.isArray(shares) ? shares : [];
+    // Fetch responses for every share that reports at least one response.
+    // Failures on individual shares are isolated — one bad share never blanks the tab.
+    const jobs = online.shares
+      .filter(function (s) { return (s.responses_count || 0) > 0; })
+      .map(function (s) {
+        return window.IPS.api('/api/shares/' + s.id + '/responses')
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('Error ' + r.status)); })
+          .then(function (rows) {
+            // Keep the share's OWN question snapshot with its OWN responses.
+            online.byShare[s.id] = {
+              questions: s.questions || (rows[0] && rows[0].share && rows[0].share.questions) || [],
+              responses: (rows || []).map(function (r) { return { answers: r.answers, submittedAt: r.submitted_at }; })
+            };
+          })
+          .catch(function () { online.byShare[s.id] = { questions: s.questions || [], responses: [], error: true }; });
+      });
+    await Promise.all(jobs);
+    online.loaded = true;
+  } catch (e) {
+    online.error = e.message || 'Failed to load online results';
+  } finally {
+    online.loading = false;
+  }
+}
+
+function IPSModeRespondent() { return window.IPS && window.IPS.mode === 'respondent'; }
+
+function shareStatusChip(s) {
+  if (!s.is_active) return '<span class="chip" style="color:var(--danger);">ended</span>';
+  if ((s.responses_count || 0) >= (s.max_respondents || 1)) return '<span class="chip" style="color:var(--warning);">full</span>';
+  return '<span class="chip" style="color:var(--success);">active</span>';
+}
+
+function getOnlineContext(shareId) {
+  const s = (State.online.shares || []).find(function (x) { return x.id === shareId; });
+  if (!s) return null;
+  const entry = State.online.byShare[shareId] || { questions: s.questions || [], responses: [] };
+  return {
+    questions: entry.questions && entry.questions.length ? entry.questions : (s.questions || []),
+    responses: entry.responses || [],
+    sessionLabel: (s.title || 'Shared interview') + ' (online)',
+    partial: false,
+    participants: s.max_respondents,
+    share: s
+  };
+}
+
+function refreshOnlineResultsUI() {
+  populateSessionPicker();
+  renderResults();
+}
+
 /* ---------- Per-link results (creator) ---------- */
 async function openShareResults(id) {
   openModal('📊 Link Results', '<div class="muted">Loading…</div>');
@@ -302,6 +369,13 @@ if (window.IPS && window.IPS.mode === 'respondent') {
 } else {
   ipRenderAuthArea();
   if (window.IPS && window.IPS.onAuthChange) {
-    window.IPS.onAuthChange(function () { ipRenderAuthArea(); });
+    window.IPS.onAuthChange(function (user) {
+      const newUid = user ? user.id : null;
+      // Account switch while this page is open: hard-reload so the boot
+      // sequence re-runs and the new account's workspace is loaded cleanly.
+      // (The previous account's in-memory State is discarded with the page.)
+      if (newUid !== (window.IPS._bootUid || null)) { window.location.reload(); return; }
+      ipRenderAuthArea();
+    });
   }
 }

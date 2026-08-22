@@ -1,7 +1,32 @@
 /* ============================================================
    InsightPulse — App State & Persistence
    ============================================================ */
-const LS_KEY = 'insightpulse.v1';
+const LS_KEY = 'insightpulse.v1'; // legacy anonymous key — read once for migration, then removed
+let __wsKey = LS_KEY;             // active workspace cache key (per-account once authed)
+
+// ---- Workspace persistence helpers (account-aware) ----
+function __activeUid() {
+  try { return (window.IPS && window.IPS.user && window.IPS.user.id) || null; } catch (e) { return null; }
+}
+function wsKeyFor(uid) { return uid ? ('insightpulse.ws.' + uid) : LS_KEY; }
+function secretsKeyFor(uid) { return 'insightpulse.secrets.' + uid; }
+function loadSecrets(uid) {
+  try { return JSON.parse(localStorage.getItem(secretsKeyFor(uid)) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveSecrets(uid) {
+  if (!uid) return;
+  try { localStorage.setItem(secretsKeyFor(uid), JSON.stringify({ geminiKey: (State.gemini && State.gemini.key) || '' })); } catch (e) {}
+}
+function saveLocalCache() {
+  try { localStorage.setItem(__wsKey, JSON.stringify(State)); } catch (e) {}
+}
+// Strip sensitive credentials from the payload that is synced to the cloud.
+// Keep the NON-secret model choice synced; the API key stays per-account-local.
+function cloudStatePayload(src) {
+  const s = JSON.parse(JSON.stringify(src));
+  if (s.gemini) s.gemini = { model: s.gemini.model || 'gemini-2.5-flash' }; // key deliberately omitted
+  return s;
+}
 
 const State = {
   theme: 'light',
@@ -21,18 +46,72 @@ const State = {
   chat: [],
   lang: 'en',
   partialSession: false,
+  // Online (shared-link) results — separate from local sessions; never persisted to cloud.
+  online: { shares: [], byShare: {}, loaded: false, loading: false, error: null },
 };
 
 function save() {
   if (window.IPS && window.IPS.mode === 'respondent') return; // respondents never persist
-  try { localStorage.setItem(LS_KEY, JSON.stringify(State)); } catch(e){}
-  try { if (window.IPS && window.IPS.sync) window.IPS.sync.scheduleSave(State); } catch(e){}
+  const uid = __activeUid();
+  if (uid) saveSecrets(uid);                       // key lives in the per-account secrets slot only
+  saveLocalCache();                                // cache / offline fallback — never the source of truth
+  // Cloud is the source of truth when signed in; send a secret-free payload.
+  try { if (window.IPS && window.IPS.sync) window.IPS.sync.scheduleSave(cloudStatePayload(State)); } catch(e){}
 }
 function load() {
+  // Returns true if anything was loaded from localStorage.
   try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) Object.assign(State, JSON.parse(raw));
+    const raw = localStorage.getItem(__wsKey);
+    if (raw) { Object.assign(State, JSON.parse(raw)); return true; }
   } catch(e){}
+  return false;
+}
+
+// Deep-merge a loaded snapshot into State, preserving the defaults'
+// shape for any fields the snapshot is missing (old blobs, new fields).
+function __deepMergeState(target, src) {
+  if (!src || typeof src !== 'object') return;
+  Object.keys(src).forEach(function (k) {
+    const v = src[k];
+    if (v && typeof v === 'object' && !Array.isArray(v)
+        && target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])) {
+      __deepMergeState(target[k], v);
+    } else {
+      target[k] = v;
+    }
+  });
+}
+
+// Restore the Gemini API key from the per-account secrets slot (never from the cloud blob).
+function restoreSecrets(uid) {
+  const s = loadSecrets(uid);
+  if (typeof State.gemini !== 'object' || !State.gemini) State.gemini = { key: '', model: 'gemini-2.5-flash' };
+  State.gemini.key = s.geminiKey || '';
+}
+
+// Clear ALL account-scoped in-memory state back to factory defaults and
+// re-render. Used before adopting a cloud workspace and before an account
+// switch, so a previous account's data can never leak into the new one.
+function clearWorkspaceState() {
+  State.theme = 'light';
+  State.sfx = true;
+  State.company = 'Acme Corporation';
+  State.sessionTitle = 'Employee Insights Session';
+  State.participants = 5;
+  State.questions = [];
+  State.responses = [];
+  State.sessions = [];
+  State.activeSessionId = null;
+  State.selectedSessionId = '';
+  State.currentTab = 'build';
+  State.currentView = 'landing';
+  State.gemini = { key: '', model: 'gemini-2.5-flash' };
+  State.interview = { active: false, participantIdx: 0, questionIdx: 0, draft: {} };
+  State.chat = [];
+  State.lang = 'en';
+  State.partialSession = false;
+  State.online = { shares: [], byShare: {}, loaded: false, loading: false, error: null };
+  try { const b = document.getElementById('aiBody'); if (b) b.innerHTML = ''; } catch (e) {}
 }
 
 /* ============================================================
@@ -590,16 +669,30 @@ function populateSessionPicker() {
   const sel = document.getElementById('sessionPicker');
   if (!sel) return;
   const sessions = (State.sessions || []).slice();
+  const shares = (State.online && State.online.shares) || [];
   // Order oldest -> newest so "Interview 1" appears first
-  const opts = ['<option value="">All sessions (' + State.responses.length + ' responses)</option>']
-    .concat(sessions.map((s, i) => {
-      const label = (s.title && s.title !== s.autoLabel) ? (s.autoLabel + ' — ' + s.title) : s.autoLabel;
-      const count = (s.responseIds||[]).length;
-      const partial = s.partial ? ' ⏹' : '';
-      return `<option value="${s.id}">${escapeHtml(label)} (${count})${partial}</option>`;
-    }));
-  sel.innerHTML = opts.join('');
-  if (State.selectedSessionId && sessions.some(s => s.id === State.selectedSessionId)) {
+  let html = '<option value="">All results (' + State.responses.length + ' local)</option>';
+  html += '<optgroup label="Local interviews">';
+  sessions.forEach((s) => {
+    const label = (s.title && s.title !== s.autoLabel) ? (s.autoLabel + ' — ' + s.title) : s.autoLabel;
+    const count = (s.responseIds||[]).length;
+    const partial = s.partial ? ' ⏹' : '';
+    html += `<option value="${s.id}">${escapeHtml(label)} (${count})${partial}</option>`;
+  });
+  html += '</optgroup>';
+  if (window.IPS && window.IPS.user) {
+    html += '<optgroup label="Online shared interviews">';
+    shares.forEach((s) => {
+      const status = !s.is_active ? ' ⏹' : ((s.responses_count||0) >= (s.max_respondents||1) ? ' ⛔' : '');
+      html += `<option value="share:${s.id}">☁ ${escapeHtml(s.title || 'Shared interview')} (${s.responses_count||0}/${s.max_respondents})${status}</option>`;
+    });
+    html += '</optgroup>';
+  }
+  sel.innerHTML = html;
+  const valid = State.selectedSessionId &&
+    (sessions.some(s => s.id === State.selectedSessionId) ||
+     (State.selectedSessionId.indexOf('share:') === 0 && shares.some(s => 'share:' + s.id === State.selectedSessionId)));
+  if (valid) {
     sel.value = State.selectedSessionId;
   } else {
     sel.value = '';
@@ -608,8 +701,15 @@ function populateSessionPicker() {
 }
 
 function getScopedContext() {
-  // Returns { questions, responses, sessionLabel } scoped to the selected session
+  // Returns { questions, responses, sessionLabel, ... } scoped to the selection.
+  // Selection kinds: '' = everything (local + online), '<sessionId>' = one local
+  // session, 'share:<uuid>' = one online shared interview.
   const sid = State.selectedSessionId;
+  if (sid && sid.indexOf('share:') === 0) {
+    const ctx = getOnlineContext(sid.slice(6));
+    if (ctx) { ctx.onlineOnly = true; return ctx; }
+    return { questions: [], responses: [], sessionLabel: 'Deleted shared interview', partial: false, participants: 0, onlineOnly: true, missing: true };
+  }
   if (sid) {
     const sess = (State.sessions||[]).find(s => s.id === sid);
     if (sess) {
@@ -619,7 +719,7 @@ function getScopedContext() {
       return { questions, responses, sessionLabel: label, partial: !!sess.partial, participants: sess.participants };
     }
   }
-  return { questions: State.questions, responses: State.responses, sessionLabel: 'All sessions', partial: State.partialSession, participants: State.participants };
+  return { questions: State.questions, responses: State.responses, sessionLabel: 'All local sessions', partial: State.partialSession, participants: State.participants, includeOnline: true };
 }
 
 function renderResults() {
@@ -628,29 +728,86 @@ function renderResults() {
   document.getElementById('stat-r').textContent = State.responses.length;
 
   const ctx = getScopedContext();
+  const online = State.online || { shares: [], byShare: {}, loaded: false, loading: false, error: null };
+  const signedIn = !!(window.IPS && window.IPS.user);
 
-  if (!ctx.responses.length) {
-    if (!State.responses.length) {
-      box.innerHTML = '<div class="muted" style="text-align:center;padding:30px;">No responses yet. Launch interviews to collect data.</div>';
-      sum.textContent = 'No responses yet.';
-    } else {
-      box.innerHTML = '<div class="muted" style="text-align:center;padding:30px;">No responses in <strong>' + escapeHtml(ctx.sessionLabel) + '</strong> yet.</div>';
-      sum.textContent = 'Viewing ' + ctx.sessionLabel + ' — 0 responses.';
+  // ---- One online share selected ----
+  if (ctx.onlineOnly) {
+    if (ctx.missing) {
+      sum.textContent = 'This shared interview no longer exists.';
+      box.innerHTML = '<div class="muted" style="text-align:center;padding:30px;">That shared interview was deleted. Its responses were removed with it.</div>';
+      return;
     }
+    const s = ctx.share;
+    sum.textContent = '☁ ' + ctx.sessionLabel + ' — ' + (s.responses_count||0) + ' of ' + s.max_respondents +
+      ' respondent(s)' + (!s.is_active ? ' · ended' : ((s.responses_count||0) >= s.max_respondents ? ' · full' : ' · active'));
+    if (!ctx.responses.length) {
+      box.innerHTML = '<div class="muted" style="text-align:center;padding:30px;">No responses collected through this link yet' + (s.is_active ? ' — it is still open.' : ' before it closed.') + '</div>';
+      return;
+    }
+    const agg = aggregate(ctx.questions, ctx.responses);
+    box.innerHTML = agg.map(a => `
+      <div class="response-item">
+        <div style="font-weight:700;margin-bottom:6px;">Q${a.idx}. ${escapeHtml(a.prompt)} <span class="chip" style="float:right;">${a.type}</span></div>
+        <div>${a.summary}</div>
+      </div>
+    `).join('');
     return;
   }
-  sum.textContent = `Viewing ${ctx.sessionLabel} — ${ctx.responses.length} submission(s) across ${ctx.questions.length} question(s).`;
-  if (ctx.partial && ctx.responses.length < (ctx.participants || Infinity)) {
-    sum.textContent += ' ⏹ Partial session — ended early before the full participant quota was met.';
+
+  // ---- Local sessions (single selected or "all local") ----
+  let html = '';
+  let totalShown = ctx.responses.length;
+  if (!ctx.responses.length) {
+    html += State.responses.length
+      ? '<div class="muted" style="text-align:center;padding:30px;">No responses in <strong>' + escapeHtml(ctx.sessionLabel) + '</strong> yet.</div>'
+      : '<div class="muted" style="text-align:center;padding:30px;">No local responses yet. Launch interviews to collect data.</div>';
+  } else {
+    const agg = aggregate(ctx.questions, ctx.responses);
+    html += agg.map(a => `
+      <div class="response-item">
+        <div style="font-weight:700;margin-bottom:6px;">Q${a.idx}. ${escapeHtml(a.prompt)} <span class="chip" style="float:right;">${a.type}</span></div>
+        <div>${a.summary}</div>
+      </div>
+    `).join('');
   }
 
-  const agg = aggregate(ctx.questions, ctx.responses);
-  box.innerHTML = agg.map(a => `
-    <div class="response-item">
-      <div style="font-weight:700;margin-bottom:6px;">Q${a.idx}. ${escapeHtml(a.prompt)} <span class="chip" style="float:right;">${a.type}</span></div>
-      <div>${a.summary}</div>
-    </div>
-  `).join('');
+  // ---- Online sections (only for the "All results" view) ----
+  if (ctx.includeOnline && signedIn) {
+    if (online.loading) {
+      html += '<hr class="sep"/><h3 style="margin:0 0 8px;font-size:15px;">☁ Online shared interviews</h3><div class="muted">Loading online results…</div>';
+    } else if (online.error) {
+      html += '<hr class="sep"/><h3 style="margin:0 0 8px;font-size:15px;">☁ Online shared interviews</h3><div class="muted" style="color:var(--danger);">Could not load online results: ' + escapeHtml(online.error) + ' — <a href="#" id="ipRetryOnline">retry</a></div>';
+    } else if (online.shares.length) {
+      html += '<hr class="sep"/><h3 style="margin:0 0 8px;font-size:15px;">☁ Online shared interviews</h3>';
+      online.shares.forEach((s) => {
+        const octx = getOnlineContext(s.id);
+        const n = s.responses_count || 0;
+        totalShown += n;
+        html += '<div class="response-item">' +
+          '<div class="row-between" style="margin-bottom:6px;"><div style="font-weight:700;">☁ ' + escapeHtml(s.title || 'Shared interview') + '</div>' + shareStatusChip(s) + '</div>' +
+          '<div class="muted" style="font-size:12px;margin-bottom:8px;">' + escapeHtml(s.company || '') + ' · ' + n + ' / ' + s.max_respondents + ' responses</div>';
+        if (octx && octx.responses.length) {
+          html += aggregate(octx.questions, octx.responses).map(a =>
+            '<div style="margin:8px 0;"><div style="font-weight:600;font-size:13px;">Q' + a.idx + '. ' + escapeHtml(a.prompt) +
+            ' <span class="chip">' + a.type + '</span></div><div>' + a.summary + '</div></div>').join('');
+        } else if (State.online.byShare[s.id] && State.online.byShare[s.id].error) {
+          html += '<div class="muted" style="color:var(--danger);">Responses failed to load — use ↻ to retry.</div>';
+        } else {
+          html += '<div class="muted">No responses yet' + (s.is_active ? ' — link is still open.' : '.') + '</div>';
+        }
+        html += '</div>';
+      });
+    }
+  }
+
+  box.innerHTML = html;
+  const scopeLabel = ctx.sessionLabel + (ctx.includeOnline && signedIn && online.shares.length ? ' + online shares' : '');
+  sum.textContent = ctx.responses.length || (ctx.includeOnline && online.shares.length)
+    ? `Viewing ${scopeLabel} — ${totalShown} submission(s).` + (ctx.partial ? ' ⏹ Partial session — ended early.' : '')
+    : 'No responses yet.';
+  const retry = document.getElementById('ipRetryOnline');
+  if (retry) retry.addEventListener('click', (e) => { e.preventDefault(); loadOnlineResults(true).then(refreshOnlineResultsUI); });
 }
 
 function aggregate(questions, responses) {
@@ -930,7 +1087,12 @@ function switchTab(name) {
     const el = document.getElementById('tab-'+x);
     if (el) el.classList.toggle('hidden', x !== name);
   });
-  if (name === 'results') { populateSessionPicker(); renderResults(); }
+  if (name === 'results') {
+    if (window.IPS && window.IPS.user && typeof loadOnlineResults === 'function') {
+      loadOnlineResults(false).then(function () { if (State.currentTab === 'results') refreshOnlineResultsUI(); });
+    }
+    populateSessionPicker(); renderResults();
+  }
   save(); sfx('soft');
 }
 
@@ -948,7 +1110,7 @@ function openSettingsModal() {
     'gemini-3.5-flash-lite','gemini-3.6-flash'
   ];
   openModal('⚙ Settings', `
-    <div class="muted" style="margin-top:0;margin-bottom:8px;">AI configuration &amp; workspace controls. Everything is stored locally in your browser.</div>
+    <div class="muted" style="margin-top:0;margin-bottom:8px;">AI configuration &amp; workspace controls. Your workspace syncs to your account; your API key stays on this device (per account).</div>
     <hr class="sep" style="margin:10px 0 18px;"/>
     <h3 style="margin:0 0 4px;font-size:15px;">🤖 Gemini API</h3>
     <div class="muted" style="font-size:12px;margin-bottom:12px;">Bring your own key — used for AI question generation, chat, and synthesis.</div>
@@ -1056,6 +1218,19 @@ function exportJSON() {
     questions: State.questions,
     responses: State.responses
   };
+  // Include online (shared-link) results, namespaced per share, when loaded.
+  const online = State.online;
+  if (online && online.loaded && (online.shares || []).length) {
+    data.onlineShares = online.shares.map(function (s) {
+      const entry = online.byShare[s.id] || { questions: s.questions || [], responses: [] };
+      return {
+        title: s.title, company: s.company, slug: s.slug,
+        status: !s.is_active ? 'ended' : ((s.responses_count||0) >= s.max_respondents ? 'full' : 'active'),
+        respondents: s.responses_count || 0, maxRespondents: s.max_respondents,
+        questions: entry.questions, responses: entry.responses
+      };
+    });
+  }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1152,6 +1327,10 @@ function bind() {
   document.getElementById('ivPrev').addEventListener('click', ivPrev);
   // results
   document.getElementById('btnExport').addEventListener('click', exportJSON);
+  const btnRefreshOnline = document.getElementById('btnRefreshOnline');
+  if (btnRefreshOnline) btnRefreshOnline.addEventListener('click', () => {
+    if (typeof loadOnlineResults === 'function') loadOnlineResults(true).then(refreshOnlineResultsUI);
+  });
   document.getElementById('btnSynthesize').addEventListener('click', aiSynthesize);
   // AI drawer
   document.getElementById('fabAI').addEventListener('click', openAI);
@@ -1192,300 +1371,82 @@ function hydrate() {
   });
 }
 
-// Bootstrap
-load();
-bind();
-hydrate();
-// Account sync: pull server-side state and re-hydrate if found (cross-device sync)
-if (window.IPS && window.IPS.sync) {
-  window.IPS.sync.loadRemote().then(function(remote){
-    if (remote) {
-      try { Object.assign(State, remote); } catch(e){}
-      var _box = document.getElementById('aiBody'); if (_box) _box.innerHTML = '';
-      hydrate();
+// ===================== BOOTSTRAP (cloud-first) =====================
+// window.IPS.user and IPS.sync._remoteState are ALREADY resolved by
+// AppShell before this script executes. Never call loadRemote() here again.
+(function ipBootstrap() {
+  const IPS = window.IPS || null;
+  const isCreator = !IPS || IPS.mode !== 'respondent';
+  const currentUid = __activeUid();
+
+  if (!isCreator) {
+    // Respondent mode: never touch localStorage or the cloud.
+    bind(); hydrate();
+    return;
+  }
+
+  if (currentUid && IPS.sync) {
+    __wsKey = wsKeyFor(currentUid);
+
+    // ---- Migration of legacy anonymous localStorage ('insightpulse.v1') ----
+    // Cloud workspace is the source of truth; the legacy blob is imported
+    // ONCE, only when the account has no cloud workspace yet.
+    let legacy = null;
+    try { legacy = localStorage.getItem(LS_KEY); } catch (e) {}
+    const legacyLooksReal = legacy && legacy !== '{}' &&
+      (function () {
+        try {
+          const o = JSON.parse(legacy);
+          return o && ((o.questions && o.questions.length) || (o.sessions && o.sessions.length) ||
+                       (o.responses && o.responses.length) || (o.gemini && o.gemini.key));
+        } catch (e) { return false; }
+      })();
+
+    const remote = IPS.sync._remoteState || null;
+    if (remote && typeof remote === 'object') {
+      // Existing cloud workspace wins; local browser cache is discarded.
+      __deepMergeState(State, remote);
+      restoreSecrets(currentUid);
+      try { localStorage.removeItem(LS_KEY); } catch (e) {}
+    } else if (legacyLooksReal) {
+      // First-ever cloud workspace: adopt the legacy local workspace, scrub
+      // the Gemini key into the per-account secrets slot, upload the rest.
+      try {
+        const o = JSON.parse(legacy);
+        __deepMergeState(State, o);
+      } catch (e) {}
+      restoreSecrets(currentUid);           // may already hold the key for this account
+      if (legacy && !loadSecrets(currentUid).geminiKey) {
+        // rescue the key from the legacy blob into the secrets slot
+        try { const o = JSON.parse(legacy); if (o.gemini && o.gemini.key) { State.gemini.key = o.gemini.key; saveSecrets(currentUid); } } catch (e) {}
+      }
+      saveLocalCache();
+      IPS.sync._flush(cloudStatePayload(State)); // immediate one-shot upload (not debounced)
+      try { localStorage.removeItem(LS_KEY); } catch (e) {}
+    } else {
+      // Fresh account, no legacy data: start clean (defaults + starter questions below).
+      clearWorkspaceState();
+      restoreSecrets(currentUid);
     }
-    if (window.IPS.sync) window.IPS.sync.ready = true;
-  }).catch(function(){ if (window.IPS.sync) window.IPS.sync.ready = true; });
-}
-
-// Seed a friendly starter question if brand-new
-if (!State.questions.length && !State.responses.length) {
-  State.questions = [
-    { id: uid(), type: 'likert', prompt: 'I feel valued and supported at work.' },
-    { id: uid(), type: 'mc', prompt: 'Which area needs the most improvement?', options: ['Communication','Leadership','Tools & processes','Work-life balance'] },
-    { id: uid(), type: 'text', prompt: 'What one change would make the biggest positive impact for you?' }
-  ];
-  renderQuestions(); save();
-  refreshLandingStats();
-}
-
-/* ============================================================
-   NEW FEATURES — shareable links, respondent cap, end-early,
-   auth UI helpers. Appended; touches nothing above.
-   ============================================================ */
-
-function ipSlug() { return Math.random().toString(36).slice(2, 10); }
-
-/* ---------- Share dialog (creator) ---------- */
-function openShareModal() {
-  if (window.IPS && !window.IPS.user) {
-    toast('Please sign in to create shareable links.', 'error'); sfx('error'); return;
-  }
-  if (!State.questions.length) { toast('Add at least one question first.', 'error'); sfx('error'); return; }
-  if (!State.company.trim()) { toast('Please enter a company name first.', 'error'); sfx('error'); return; }
-
-  openModal('🔗 Share Interview', `
-    <div class="muted" style="margin-top:0;margin-bottom:14px;">
-      Generate a unique link anyone can answer — no account needed on their end.
-      The interview content below is a snapshot of your current builder.
-    </div>
-    <div class="field">
-      <label>Interview title</label>
-      <input type="text" id="shareTitle" value="${escapeHtml(State.sessionTitle || (State.company + ' Interview'))}" />
-    </div>
-    <div class="field">
-      <label>Max respondents (cap)</label>
-      <input type="number" id="shareCap" min="1" max="10000" value="${State.participants || 5}" />
-      <div class="muted" style="font-size:12px;margin-top:4px;">The link closes automatically once this many people have submitted.</div>
-    </div>
-    <div class="inline-row">
-      <button class="btn primary" id="btnCreateShare">🔗 Generate link</button>
-    </div>
-    <div id="shareNewLink" class="hidden" style="margin-top:14px;">
-      <div class="field">
-        <label>Your shareable link</label>
-        <div class="inline-row" style="flex-wrap:nowrap;">
-          <input type="text" id="shareLinkOut" readonly style="flex:1;" />
-          <button class="btn sm" id="btnCopyShare">📋 Copy</button>
-        </div>
-      </div>
-    </div>
-    <hr class="sep"/>
-    <h3 style="margin:0 0 8px;font-size:15px;">Your shared links</h3>
-    <div id="shareList"><div class="muted">Loading…</div></div>
-  `);
-  document.getElementById('btnCreateShare').addEventListener('click', createShareLink);
-  document.getElementById('btnCopyShare').addEventListener('click', function () {
-    const inp = document.getElementById('shareLinkOut');
-    inp.select();
-    navigator.clipboard.writeText(inp.value).then(function () { toast('Link copied ✓', 'success'); });
-  });
-  loadShareList();
-  sfx('open');
-}
-
-async function createShareLink() {
-  const btn = document.getElementById('btnCreateShare');
-  const title = document.getElementById('shareTitle').value.trim() || (State.company + ' Interview');
-  const cap = Math.max(1, parseInt(document.getElementById('shareCap').value) || 1);
-  btn.disabled = true; btn.textContent = 'Creating…';
-  try {
-    const res = await window.IPS.api('/api/shares', {
-      method: 'POST',
-      body: JSON.stringify({
-        title: title,
-        company: State.company,
-        questions: State.questions,
-        max_respondents: cap
-      })
-    });
-    if (!res.ok) {
-      const d = await res.json().catch(function () { return {}; });
-      throw new Error(d.error || ('Error ' + res.status));
-    }
-    const row = await res.json();
-    const url = window.location.origin + '/i/' + row.slug;
-    document.getElementById('shareNewLink').classList.remove('hidden');
-    document.getElementById('shareLinkOut').value = url;
-    toast('Share link created ✓', 'success'); sfx('submit');
-    loadShareList();
-  } catch (e) {
-    toast(e.message, 'error'); sfx('error');
-  } finally {
-    btn.disabled = false; btn.textContent = '🔗 Generate link';
-  }
-}
-
-async function loadShareList() {
-  const box = document.getElementById('shareList');
-  if (!box) return;
-  try {
-    const res = await window.IPS.api('/api/shares');
-    const rows = await res.json();
-    if (!rows.length) { box.innerHTML = '<div class="muted">No links yet.</div>'; return; }
-    box.innerHTML = rows.map(function (r) {
-      const url = window.location.origin + '/i/' + r.slug;
-      const status = !r.is_active
-        ? '<span class="chip" style="color:var(--danger);">closed</span>'
-        : (r.responses_count >= r.max_respondents
-          ? '<span class="chip" style="color:var(--warning);">cap reached</span>'
-          : '<span class="chip" style="color:var(--success);">open</span>');
-      return '<div class="card" style="padding:12px 14px;margin-bottom:10px;">' +
-        '<div class="row-between" style="gap:10px;flex-wrap:wrap;">' +
-          '<div style="min-width:0;">' +
-            '<div style="font-weight:700;">' + escapeHtml(r.title) + ' ' + status + '</div>' +
-            '<div class="muted" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px;">' + escapeHtml(url) + '</div>' +
-            '<div class="muted" style="font-size:12px;">' + r.responses_count + ' / ' + r.max_respondents + ' responses</div>' +
-          '</div>' +
-          '<div class="inline-row">' +
-            '<button class="btn sm" data-copy="' + r.slug + '">📋 Copy</button>' +
-            '<button class="btn sm" data-results="' + r.id + '">📊 Results</button>' +
-            (r.is_active ? '<button class="btn warn sm" data-end="' + r.id + '">⏹ End</button>'
-                         : '<button class="btn sm" data-reopen="' + r.id + '">↻ Reopen</button>') +
-          '</div>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-    box.querySelectorAll('[data-copy]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        navigator.clipboard.writeText(window.location.origin + '/i/' + b.getAttribute('data-copy'))
-          .then(function () { toast('Link copied ✓', 'success'); });
-      });
-    });
-    box.querySelectorAll('[data-end]').forEach(function (b) {
-      b.addEventListener('click', function () { setShareActive(b.getAttribute('data-end'), false); });
-    });
-    box.querySelectorAll('[data-reopen]').forEach(function (b) {
-      b.addEventListener('click', function () { setShareActive(b.getAttribute('data-reopen'), true); });
-    });
-    box.querySelectorAll('[data-results]').forEach(function (b) {
-      b.addEventListener('click', function () { openShareResults(b.getAttribute('data-results')); });
-    });
-  } catch (e) {
-    box.innerHTML = '<div class="muted">Could not load links: ' + escapeHtml(e.message) + '</div>';
-  }
-}
-
-async function setShareActive(id, active) {
-  if (!active && !confirm('End this interview early? The link will stop accepting new responses immediately.')) return;
-  try {
-    const res = await window.IPS.api('/api/shares/' + id, {
-      method: 'PATCH',
-      body: JSON.stringify({ is_active: active })
-    });
-    if (!res.ok) throw new Error('Error ' + res.status);
-    toast(active ? 'Link reopened ✓' : 'Interview ended — link is now closed', 'success');
-    sfx('submit');
-    loadShareList();
-  } catch (e) { toast(e.message, 'error'); sfx('error'); }
-}
-
-/* ---------- Per-link results (creator) ---------- */
-async function openShareResults(id) {
-  openModal('📊 Link Results', '<div class="muted">Loading…</div>');
-  try {
-    const res = await window.IPS.api('/api/shares/' + id + '/responses');
-    const rows = await res.json();
-    if (!res.ok) throw new Error(rows.error || ('Error ' + res.status));
-    if (!rows.length) {
-      document.getElementById('modalBody').innerHTML =
-        '<div class="muted" style="text-align:center;padding:24px;">No responses yet for this link.</div>';
-      return;
-    }
-    const agg = aggregate(rows[0].share.questions, rows.map(function (r) { return { answers: r.answers }; }));
-    document.getElementById('modalBody').innerHTML =
-      '<div class="muted" style="margin-top:0;margin-bottom:12px;">' + rows.length + ' response(s) · ' +
-      escapeHtml(rows[0].share.title) + '</div>' +
-      agg.map(function (a) {
-        return '<div class="response-item">' +
-          '<div style="font-weight:700;margin-bottom:6px;">Q' + a.idx + '. ' + escapeHtml(a.prompt) +
-          ' <span class="chip" style="float:right;">' + a.type + '</span></div>' +
-          '<div>' + a.summary + '</div></div>';
-      }).join('');
-  } catch (e) {
-    document.getElementById('modalBody').innerHTML =
-      '<div class="muted" style="color:var(--danger);">' + escapeHtml(e.message) + '</div>';
-  }
-}
-
-/* ---------- Respondent mode: submit + thank-you screen ---------- */
-async function ipRespondentSubmit(answers) {
-  try {
-    const res = await fetch('/api/shares/slug/' + window.IPS.share.slug + '/respond', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answers: answers })
-    });
-    const d = await res.json().catch(function () { return {}; });
-    if (res.status === 410 || d.closed) {
-      ipShowClosed(window.IPS.share, 'This interview was just closed. Thanks for your interest!');
-      return;
-    }
-    if (!res.ok) throw new Error(d.error || ('Error ' + res.status));
-    ipShowThankYou(window.IPS.share.company || '');
-  } catch (e) {
-    toast(e.message, 'error'); sfx('error');
-    State.interview.active = true; // let them retry
-  }
-}
-
-function ipShowThankYou(company) {
-  document.getElementById('interviewShell').classList.add('hidden');
-  const ty = document.getElementById('ipThankYou');
-  ty.classList.remove('hidden');
-  document.getElementById('ipTyText').textContent =
-    'Thanks for finishing this interview — ' + company + ', powered by InsightPulse';
-  sfx('submit');
-}
-
-function ipShowClosed(share, msg) {
-  document.getElementById('interviewShell').classList.add('hidden');
-  const el = document.getElementById('ipClosed');
-  el.classList.remove('hidden');
-  document.getElementById('ipClosedMsg').textContent =
-    msg || ('This interview is closed' + (share && share.company ? ' — ' + share.company : '') + '.');
-}
-
-/* ---------- Respondent boot: configure interview shell, hide creator UI ---------- */
-function ipRespondentInit(share) {
-  State.company = share.company;
-  State.questions = share.questions || [];
-  State.participants = 1;
-  State.lang = 'en';
-  State.interview = { active: true, participantIdx: 0, questionIdx: 0, draft: {} };
-
-  document.getElementById('ivCompany').textContent = share.company;
-  document.getElementById('ivSubtitle').textContent = share.title || (share.company + ' Interview');
-  document.getElementById('btnEndEarly').classList.add('hidden');
-  document.getElementById('btnExitIV').classList.add('hidden');
-  document.getElementById('fabAI').classList.add('hidden');
-  const ov = document.getElementById('ivLang');
-  if (ov) ov.value = 'en';
-
-  renderInterview();
-}
-
-/* ---------- Creator auth UI + share button ---------- */
-function ipRenderAuthArea() {
-  const holder = document.getElementById('ipAuthArea');
-  if (!holder) return;
-  if (window.IPS && window.IPS.user) {
-    const u = window.IPS.user;
-    holder.innerHTML =
-      '<span class="chip" title="' + escapeHtml(u.email || '') + '" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">👤 ' +
-      escapeHtml((u.user_metadata && (u.user_metadata.full_name || u.user_metadata.name)) || u.email || 'Account') + '</span>' +
-      '<button class="btn" id="btnShareInterview" title="Create a shareable link">🔗 Share</button>' +
-      '<button class="btn icon" id="ipSignOut" title="Sign out">⎋</button>';
-    document.getElementById('ipSignOut').addEventListener('click', function () { window.IPS.signOut(); });
-    document.getElementById('btnShareInterview').addEventListener('click', openShareModal);
+    IPS.sync._ownerUid = currentUid;
+    IPS.sync.ready = true;
   } else {
-    holder.innerHTML = '<button class="btn" id="ipSignIn">🔐 Sign in</button>';
-    document.getElementById('ipSignIn').addEventListener('click', function () { window.location.href = '/login'; });
+    // Signed out: behave exactly like the pre-auth app — pure local state.
+    __wsKey = LS_KEY;
+    load();
   }
-}
 
-/* ---------- Wire up after original bootstrap ---------- */
-if (window.IPS && window.IPS.mode === 'respondent') {
-  if (window.IPS.share && window.IPS.share.closed) {
-    ipShowClosed(window.IPS.share);
-  } else if (window.IPS.share) {
-    ipRespondentInit(window.IPS.share);
-  } else {
-    ipShowClosed(null, 'This interview link is invalid or has been removed.');
+  bind();
+  hydrate();
+
+  // Seed a friendly starter question if brand-new
+  if (!State.questions.length && !State.responses.length) {
+    State.questions = [
+      { id: uid(), type: 'likert', prompt: 'I feel valued and supported at work.' },
+      { id: uid(), type: 'mc', prompt: 'Which area needs the most improvement?', options: ['Communication','Leadership','Tools & processes','Work-life balance'] },
+      { id: uid(), type: 'text', prompt: 'What one change would make the biggest positive impact for you?' }
+    ];
+    renderQuestions(); save();
+    refreshLandingStats();
   }
-} else {
-  ipRenderAuthArea();
-  if (window.IPS && window.IPS.onAuthChange) {
-    window.IPS.onAuthChange(function () { ipRenderAuthArea(); });
-  }
-}
+})();
